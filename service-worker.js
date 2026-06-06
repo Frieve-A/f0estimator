@@ -1,12 +1,12 @@
 "use strict";
 
-const CACHE_NAME = "frieve-f0-estimator-v6";
+const CACHE_NAME = "frieve-f0-estimator-v11";
 const APP_SHELL = [
   "./",
   "./index.html",
   "./styles.css",
-  "./app.js?v=6",
-  "./renderer-worker.js?v=6",
+  "./app.js?v=11",
+  "./renderer-worker.js?v=11",
   "./audio-worklet.js",
   "./manifest.webmanifest",
   "./assets/ogp.png",

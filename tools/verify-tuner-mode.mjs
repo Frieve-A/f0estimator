@@ -80,7 +80,16 @@ const canvasContext = {
   createLinearGradient() {
     return { addColorStop() {} };
   },
-  fillRect() {},
+  fillRect(x, y, width, height) {
+    this.operations.push({
+      type: "fillRect",
+      x,
+      y,
+      width,
+      height,
+      fillStyle: this.fillStyle,
+    });
+  },
   beginPath() {},
   moveTo() {},
   lineTo() {
@@ -96,6 +105,20 @@ const canvasContext = {
   clip() {},
   rect() {},
   fillText() {},
+  strokeText(text, x, y) {
+    this.operations.push({
+      type: "strokeText",
+      text,
+      x,
+      y,
+      font: this.font,
+    });
+  },
+  measureText(text) {
+    const textValue = String(text);
+    const charWidth = typeof this.font === "string" && this.font.includes("38px") ? 22 : 8;
+    return { width: textValue.length * charWidth };
+  },
   arc() {},
   fill() {},
   setLineDash(value) {
@@ -119,7 +142,6 @@ const elementIds = [
   "thresholdValue",
   "engineBadge",
   "currentStatus",
-  "currentNote",
   "currentCents",
   "currentHz",
   "currentMidi",
@@ -137,6 +159,7 @@ const elementIds = [
 ];
 
 const elements = new Map(elementIds.map((id) => [id, createElement(id)]));
+const analyticsEvents = [];
 
 const context = {
   console,
@@ -152,6 +175,9 @@ const context = {
     innerWidth: 1280,
     devicePixelRatio: 1,
     isSecureContext: true,
+    gtag(...args) {
+      analyticsEvents.push(args);
+    },
     addEventListener() {},
   },
   navigator: {},
@@ -207,6 +233,7 @@ context.setMessage("Idle");
 assert(elements.get("modeValue").textContent === "Graph", "initial mode should be Graph");
 assert(elements.get("pitchZoomInBtn").disabled === false, "pitch zoom in should start enabled");
 assert(elements.get("pitchZoomOutBtn").disabled === false, "pitch zoom out should start enabled");
+assert(analyticsEvents.length === 0, "initial mode restore should not send mode analytics");
 
 click("modeToggleBtn");
 assert(elements.get("modeValue").textContent === "Tuner", "mode should switch to Tuner");
@@ -214,9 +241,14 @@ assert(elements.get("pitchZoomInBtn").disabled === true, "pitch zoom in should b
 assert(elements.get("pitchZoomOutBtn").disabled === true, "pitch zoom out should be disabled in Tuner");
 assert(elements.get("pitchScrollbar").getAttribute("aria-disabled") === "true", "pitch scrollbar should be marked disabled in Tuner");
 assert(elements.get("rangeStatus").textContent.includes("Tuner: A4"), "Tuner should default to A4 before detection");
+assert(
+  JSON.stringify(analyticsEvents.at(-1)) === JSON.stringify(["event", "view_mode_switch", { view_mode: "Tuner" }]),
+  "switching to Tuner should send one mode analytics event",
+);
 
-const c4Frequency = 440 * (2 ** ((60 - 69) / 12));
-const d4Frequency = 440 * (2 ** ((62 - 69) / 12));
+const frequencyFromMidi = (midi) => 440 * (2 ** ((midi - 69) / 12));
+const c4Frequency = frequencyFromMidi(60);
+const d4Frequency = frequencyFromMidi(62);
 context.addPitchSample(0, c4Frequency, 0.7);
 assert(elements.get("rangeStatus").textContent.includes("Tuner: A4"), "Tuner should ignore low-confidence note changes");
 context.addPitchSample(0.01, c4Frequency, 0.95);
@@ -242,10 +274,100 @@ assert(
   )),
   "Tuner average trace should be solid",
 );
+assert(
+  canvasContext.operations.some((operation) => (
+    operation.type === "strokeText"
+    && operation.text === "D4"
+    && operation.x > 54
+    && operation.y > 300
+  )),
+  "Current note label should be drawn in the lower-left graph area",
+);
 
 click("modeToggleBtn");
 assert(elements.get("modeValue").textContent === "Graph", "mode should switch back to Graph");
 assert(elements.get("pitchZoomInBtn").disabled === false, "pitch zoom in should re-enable in Graph");
 assert(elements.get("rangeStatus").textContent.startsWith("Range:"), "Graph should restore range status");
+assert(
+  JSON.stringify(analyticsEvents.at(-1)) === JSON.stringify(["event", "view_mode_switch", { view_mode: "Graph" }]),
+  "switching to Graph should send one mode analytics event",
+);
+assert(analyticsEvents.length === 2, "only mode switches should send custom analytics events");
+
+const thresholdInputHandler = eventHandlers.get("thresholdInput:input");
+assert(thresholdInputHandler, "missing input handler for confidence threshold");
+elements.get("thresholdInput").value = "0.80";
+thresholdInputHandler();
+context.clearHistory();
+context.addPitchSample(0, frequencyFromMidi(60.10), 0.95);
+context.addPitchSample(0.25, frequencyFromMidi(59.80), 0.95);
+context.addPitchSample(0.5, frequencyFromMidi(60.05), 0.95);
+context.addPitchSample(0.75, frequencyFromMidi(59.85), 0.95);
+canvasContext.resetOperations();
+context.draw();
+assert(
+  !canvasContext.operations.some((operation) => operation.type === "strokeText" && operation.text.startsWith("MAD ")),
+  "Sustained deviation should be hidden before one second of one note",
+);
+context.addPitchSample(1, frequencyFromMidi(60), 0.95);
+canvasContext.resetOperations();
+context.draw();
+assert(
+  canvasContext.operations.some((operation) => (
+    operation.type === "strokeText"
+    && operation.text === "MAD 10.0 cent"
+    && operation.x > 120
+    && operation.y > 300
+  )),
+  "Sustained deviation should appear to the right of the note label after one second",
+);
+context.addPitchSample(1.25, frequencyFromMidi(60.30), 0.95);
+canvasContext.resetOperations();
+context.draw();
+assert(
+  canvasContext.operations.some((operation) => operation.type === "strokeText" && operation.text === "MAD 10.0 cent"),
+  "Sustained deviation should hold its value between one-second update boundaries",
+);
+context.addPitchSample(1.5, frequencyFromMidi(59.60), 0.95);
+context.addPitchSample(1.75, frequencyFromMidi(60.49), 0.95);
+context.addPitchSample(2, frequencyFromMidi(59.80), 0.95);
+canvasContext.resetOperations();
+context.draw();
+assert(
+  canvasContext.operations.some((operation) => operation.type === "strokeText" && operation.text === "MAD 21.0 cent"),
+  "Sustained deviation should update on the next one-second boundary",
+);
+context.addPitchSample(2.25, d4Frequency, 0.95);
+canvasContext.resetOperations();
+context.draw();
+assert(
+  !canvasContext.operations.some((operation) => operation.type === "strokeText" && operation.text.startsWith("MAD ")),
+  "Sustained deviation should reset when the detected note changes",
+);
+
+const e4Frequency = frequencyFromMidi(64);
+const g4Frequency = frequencyFromMidi(67);
+context.clearHistory();
+context.addPitchSample(0, e4Frequency, 0.7);
+context.addPitchSample(0.02, g4Frequency, 0.92);
+context.addPitchSample(0.04, g4Frequency, 0.95);
+canvasContext.resetOperations();
+context.draw();
+const noteRollRects = canvasContext.operations.filter((operation) => (
+  operation.type === "fillRect"
+  && typeof operation.fillStyle === "string"
+  && operation.fillStyle.startsWith("rgba(255, 207, 74,")
+));
+const e4Y = context.midiToY(64);
+const g4Y = context.midiToY(67);
+const containsY = (rect, y) => y >= rect.y && y <= rect.y + rect.height;
+assert(
+  noteRollRects.some((rect) => containsY(rect, g4Y)),
+  "Graph should draw confidence-weighted note detections as a piano roll behind the trace",
+);
+assert(
+  !noteRollRects.some((rect) => containsY(rect, e4Y)),
+  "Graph note detection should ignore samples below the confidence threshold",
+);
 
 console.log("verify-tuner-mode ok");

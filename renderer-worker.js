@@ -10,7 +10,16 @@ const TUNER_DEFAULT_CENTER_MIDI = 69;
 const TUNER_HALF_RANGE_MIDI = 0.5;
 const TUNER_CENT_GRID_STEP = 10;
 const HIGH_CONFIDENCE_THRESHOLD = 0.75;
+const NOTE_ROLL_MAX_GAP_SEC = 0.32;
+const NOTE_ROLL_MIN_DURATION_SEC = 0.035;
+const NOTE_ROLL_SINGLE_SAMPLE_SEC = 0.045;
+const NOTE_ROLL_PITCH_TOLERANCE_MIDI = 0.62;
+const NOTE_ROLL_MIN_WIDTH_PX = 3;
 const PITCH_AXIS_WIDTH = 54;
+const CURRENT_NOTE_LABEL_FONT = "800 38px ui-sans-serif, system-ui, sans-serif";
+const CURRENT_DEVIATION_LABEL_FONT_SIZE = 16;
+const CURRENT_DEVIATION_LABEL_FONT_FAMILY = "ui-sans-serif, system-ui, sans-serif";
+const CURRENT_DEVIATION_LABEL_GAP_PX = 16;
 const NOTE_NAMES = ["C", "C♯", "D", "E♭", "E", "F", "F♯", "G", "A♭", "A", "B♭", "B"];
 const UI_THEME = {
   canvasBgTop: "#101722",
@@ -34,6 +43,8 @@ const UI_THEME = {
   trace: "37, 223, 210",
   traceHot: "#25dfd2",
   traceWarm: "#ffb703",
+  noteRoll: "255, 207, 74",
+  noteRollEdge: "255, 255, 255",
   tunerAverage: "#ffcf4a",
   now: "#ff4d8d",
   hoverFill: "#f7f4ec",
@@ -398,6 +409,8 @@ function drawTrace() {
 
   const tunerMode = isTunerMode();
   if (!tunerMode) {
+    drawDetectedNoteRoll(ctx, leftTime, rightTime, pitchRange, bounds);
+
     let segmentOpen = false;
     let previous = null;
     ctx.lineWidth = 2.4;
@@ -484,7 +497,215 @@ function drawTrace() {
     ctx.strokeStyle = UI_THEME.traceWarm;
     ctx.stroke();
   }
+  drawCurrentNoteLabel(ctx, state.renderState.currentNoteLabel, state.renderState.currentDeviationLabel);
   ctx.restore();
+}
+
+function drawDetectedNoteRoll(ctx, leftTime, rightTime, pitchRange, bounds) {
+  const noteEvents = detectGraphNoteEvents(leftTime, rightTime, pitchRange, bounds);
+  if (noteEvents.length === 0) {
+    return;
+  }
+
+  ctx.save();
+  ctx.shadowBlur = 0;
+  for (const event of noteEvents) {
+    const x1 = clamp(timeToX(event.startTime, rightTime), PITCH_AXIS_WIDTH, state.canvas.width);
+    const x2 = clamp(timeToX(event.endTime, rightTime), PITCH_AXIS_WIDTH, state.canvas.width);
+    const width = Math.max(NOTE_ROLL_MIN_WIDTH_PX, x2 - x1);
+    const yTop = midiToY(event.noteMidi + 0.45);
+    const yBottom = midiToY(event.noteMidi - 0.45);
+    const top = Math.min(yTop, yBottom);
+    const height = Math.max(2, Math.abs(yBottom - yTop));
+    const confidence = graphNoteConfidenceRatio(event.confidence);
+    const fillAlpha = clamp(0.10 + confidence * 0.25, 0.10, 0.35);
+    const edgeAlpha = clamp(fillAlpha + 0.10, 0.16, 0.42);
+
+    ctx.fillStyle = `rgba(${UI_THEME.noteRoll}, ${fillAlpha})`;
+    ctx.fillRect(x1, top, width, height);
+    ctx.fillStyle = `rgba(${UI_THEME.noteRollEdge}, ${edgeAlpha})`;
+    ctx.fillRect(x1, top, width, 1);
+    ctx.fillRect(x1, top + height - 1, width, 1);
+  }
+  ctx.restore();
+}
+
+function detectGraphNoteEvents(leftTime, rightTime, pitchRange, bounds) {
+  const events = [];
+  const threshold = getConfidenceThreshold();
+  let current = null;
+  let previousUsableTime = null;
+
+  for (let i = bounds.start; i < bounds.end; i += 1) {
+    const sample = state.pitchSamples[i];
+    if (!sample || sample.timeSec < leftTime) {
+      continue;
+    }
+    if (sample.timeSec > rightTime) {
+      break;
+    }
+
+    if (!graphNoteSampleIsUsable(sample, threshold)) {
+      finishGraphNoteEvent(events, current, leftTime, rightTime);
+      current = null;
+      previousUsableTime = null;
+      continue;
+    }
+
+    const noteMidi = clamp(Math.round(sample.midiFloat), HARD_MIN_MIDI, HARD_MAX_MIDI);
+    const gap = previousUsableTime === null ? Infinity : sample.timeSec - previousUsableTime;
+    const sameEvent = current
+      && gap <= NOTE_ROLL_MAX_GAP_SEC
+      && Math.abs(sample.midiFloat - current.noteMidi) <= NOTE_ROLL_PITCH_TOLERANCE_MIDI;
+
+    if (!sameEvent) {
+      finishGraphNoteEvent(events, current, leftTime, rightTime);
+      current = startGraphNoteEvent(sample, noteMidi, threshold);
+    } else {
+      appendGraphNoteEvent(current, sample, threshold);
+    }
+
+    previousUsableTime = sample.timeSec;
+  }
+
+  finishGraphNoteEvent(events, current, leftTime, rightTime);
+  return events.filter((event) => graphNoteEventIntersectsPitchRange(event, pitchRange));
+}
+
+function graphNoteSampleIsUsable(sample, threshold) {
+  return sample.confidence >= threshold
+    && sample.frequency > 0
+    && Number.isFinite(sample.midiFloat)
+    && sample.midiFloat >= HARD_MIN_MIDI
+    && sample.midiFloat <= HARD_MAX_MIDI;
+}
+
+function startGraphNoteEvent(sample, noteMidi, threshold) {
+  const weight = graphNoteConfidenceWeight(sample.confidence, threshold);
+  return {
+    startTime: sample.timeSec,
+    lastTime: sample.timeSec,
+    noteMidi,
+    weightedMidi: sample.midiFloat * weight,
+    weightSum: weight,
+    confidenceSum: sample.confidence,
+    samples: 1,
+    stepSum: 0,
+    stepCount: 0,
+  };
+}
+
+function appendGraphNoteEvent(event, sample, threshold) {
+  const weight = graphNoteConfidenceWeight(sample.confidence, threshold);
+  const step = sample.timeSec - event.lastTime;
+  if (Number.isFinite(step) && step > 0) {
+    event.stepSum += step;
+    event.stepCount += 1;
+  }
+  event.lastTime = sample.timeSec;
+  event.weightedMidi += sample.midiFloat * weight;
+  event.weightSum += weight;
+  event.confidenceSum += sample.confidence;
+  event.samples += 1;
+  event.noteMidi = clamp(Math.round(event.weightedMidi / event.weightSum), HARD_MIN_MIDI, HARD_MAX_MIDI);
+}
+
+function finishGraphNoteEvent(events, event, leftTime, rightTime) {
+  if (!event || event.samples <= 0) {
+    return;
+  }
+
+  const confidence = event.confidenceSum / event.samples;
+  const duration = Math.max(0, event.lastTime - event.startTime);
+  if (duration < NOTE_ROLL_MIN_DURATION_SEC && event.samples < 2 && confidence < HIGH_CONFIDENCE_THRESHOLD) {
+    return;
+  }
+
+  const averageStep = event.stepCount > 0
+    ? clamp(event.stepSum / event.stepCount, 0.005, NOTE_ROLL_MAX_GAP_SEC)
+    : NOTE_ROLL_SINGLE_SAMPLE_SEC;
+  events.push({
+    startTime: Math.max(leftTime, event.startTime - averageStep * 0.5),
+    endTime: Math.min(rightTime, event.lastTime + averageStep * 0.5),
+    noteMidi: event.noteMidi,
+    confidence,
+  });
+}
+
+function graphNoteEventIntersectsPitchRange(event, pitchRange) {
+  return event.noteMidi + 0.5 >= pitchRange.minMidi
+    && event.noteMidi - 0.5 <= pitchRange.maxMidi
+    && event.endTime > event.startTime;
+}
+
+function graphNoteConfidenceWeight(confidence, threshold) {
+  return 0.25 + graphNoteConfidenceRatio(confidence, threshold) * 0.75;
+}
+
+function graphNoteConfidenceRatio(confidence, threshold = getConfidenceThreshold()) {
+  const usableSpan = Math.max(0.001, 1 - threshold);
+  return clamp((confidence - threshold) / usableSpan, 0, 1);
+}
+
+function getConfidenceThreshold() {
+  return state.renderState.analysis.confidenceThreshold;
+}
+
+function drawCurrentNoteLabel(ctx, noteLabel, deviationLabel = "") {
+  if (!noteLabel) {
+    return;
+  }
+
+  const x = PITCH_AXIS_WIDTH + 14;
+  const y = Math.max(34, state.canvas.height - 16);
+  ctx.save();
+  ctx.font = CURRENT_NOTE_LABEL_FONT;
+  ctx.textAlign = "left";
+  ctx.textBaseline = "alphabetic";
+  ctx.lineJoin = "round";
+  ctx.shadowColor = "rgba(0, 0, 0, 0.72)";
+  ctx.shadowBlur = 10;
+  ctx.lineWidth = 5;
+  ctx.strokeStyle = "rgba(7, 11, 16, 0.82)";
+  ctx.strokeText(noteLabel, x, y);
+  ctx.fillStyle = UI_THEME.labelStrong;
+  ctx.fillText(noteLabel, x, y);
+
+  if (deviationLabel) {
+    const noteWidth = measureTextWidth(ctx, noteLabel, noteLabel.length * 24);
+    const deviationX = x + noteWidth + CURRENT_DEVIATION_LABEL_GAP_PX;
+    const availableWidth = state.canvas.width - deviationX - 8;
+    if (availableWidth >= 68) {
+      ctx.font = currentDeviationLabelFont(CURRENT_DEVIATION_LABEL_FONT_SIZE);
+      const deviationWidth = measureTextWidth(ctx, deviationLabel, deviationLabel.length * 8);
+      if (deviationWidth > availableWidth) {
+        const scaledSize = clamp(
+          Math.floor(CURRENT_DEVIATION_LABEL_FONT_SIZE * (availableWidth / deviationWidth)),
+          12,
+          CURRENT_DEVIATION_LABEL_FONT_SIZE,
+        );
+        ctx.font = currentDeviationLabelFont(scaledSize);
+      }
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = "rgba(7, 11, 16, 0.78)";
+      ctx.strokeText(deviationLabel, deviationX, y - 2);
+      ctx.fillStyle = UI_THEME.label;
+      ctx.fillText(deviationLabel, deviationX, y - 2);
+    }
+  }
+  ctx.restore();
+}
+
+function currentDeviationLabelFont(size) {
+  return `700 ${size}px ${CURRENT_DEVIATION_LABEL_FONT_FAMILY}`;
+}
+
+function measureTextWidth(ctx, text, fallbackWidth) {
+  if (typeof ctx.measureText !== "function") {
+    return fallbackWidth;
+  }
+  const metrics = ctx.measureText(text);
+  return metrics && Number.isFinite(metrics.width) ? metrics.width : fallbackWidth;
 }
 
 function drawTunerAverageTrace(ctx, leftTime, rightTime, pitchRange, bounds) {

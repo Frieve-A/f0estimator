@@ -618,7 +618,7 @@ canvas {
 
 .current-status {
   display: grid;
-  grid-template-columns: max-content 8ch 8ch 8.5ch 9ch 10ch;
+  grid-template-columns: max-content 8ch 8.5ch 9ch 10ch;
   gap: 8px;
   align-items: baseline;
 }
@@ -633,11 +633,6 @@ canvas {
 
 .current-status-label {
   color: var(--muted-2);
-}
-
-.current-status-note {
-  color: var(--accent-2);
-  text-align: left;
 }
 
 .current-status-number {

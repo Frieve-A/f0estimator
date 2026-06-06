@@ -13,17 +13,28 @@ const HARD_MAX_MIDI = 96;
 const MIN_PITCH_SPAN = 12;
 const VIEW_MODE_GRAPH = "graph";
 const VIEW_MODE_TUNER = "tuner";
-const RENDERER_WORKER_URL = "renderer-worker.js?v=6";
+const RENDERER_WORKER_URL = "renderer-worker.js?v=11";
 const TUNER_DEFAULT_CENTER_MIDI = 69;
 const TUNER_HALF_RANGE_MIDI = 0.5;
 const TUNER_CENT_GRID_STEP = 10;
 const TUNER_AVERAGE_TIME_CONSTANT_SEC = 0.35;
 const TUNER_AVERAGE_RESET_GAP_SEC = 0.6;
 const HIGH_CONFIDENCE_THRESHOLD = 0.75;
+const NOTE_ROLL_MAX_GAP_SEC = 0.32;
+const NOTE_ROLL_MIN_DURATION_SEC = 0.035;
+const NOTE_ROLL_SINGLE_SAMPLE_SEC = 0.045;
+const NOTE_ROLL_PITCH_TOLERANCE_MIDI = 0.62;
+const NOTE_ROLL_MIN_WIDTH_PX = 3;
+const SUSTAINED_DEVIATION_MIN_DURATION_SEC = 1;
+const SUSTAINED_DEVIATION_UPDATE_INTERVAL_SEC = 1;
 const STATUS_UPDATE_INTERVAL_MS = 100;
 const DEFAULT_VOCAL_MIN_MIDI = 40;
 const DEFAULT_VOCAL_MAX_MIDI = 84;
 const PITCH_AXIS_WIDTH = 54;
+const CURRENT_NOTE_LABEL_FONT = "800 38px ui-sans-serif, system-ui, sans-serif";
+const CURRENT_DEVIATION_LABEL_FONT_SIZE = 16;
+const CURRENT_DEVIATION_LABEL_FONT_FAMILY = "ui-sans-serif, system-ui, sans-serif";
+const CURRENT_DEVIATION_LABEL_GAP_PX = 16;
 const PITCH_AUTO_SCROLL_MARGIN_MIDI = 1.5;
 const GRAPH_TAP_MOVE_PX = 6;
 const SCROLLBAR_TIME_CLEARANCE_PX = 4;
@@ -66,6 +77,8 @@ const UI_THEME = {
   trace: "37, 223, 210",
   traceHot: "#25dfd2",
   traceWarm: "#ffb703",
+  noteRoll: "255, 207, 74",
+  noteRollEdge: "255, 255, 255",
   tunerAverage: "#ffcf4a",
   now: "#ff4d8d",
   hoverFill: "#f7f4ec",
@@ -86,7 +99,6 @@ const els = {
   thresholdValue: document.getElementById("thresholdValue"),
   engineBadge: document.getElementById("engineBadge"),
   currentStatus: document.getElementById("currentStatus"),
-  currentNote: document.getElementById("currentNote"),
   currentCents: document.getElementById("currentCents"),
   currentHz: document.getElementById("currentHz"),
   currentMidi: document.getElementById("currentMidi"),
@@ -126,6 +138,15 @@ const state = {
     midiFloat: null,
     noteMidi: null,
     timeSec: null,
+  },
+  sustainedDeviation: {
+    noteMidi: null,
+    startTimeSec: null,
+    lastVoicedTimeSec: null,
+    sampleCount: 0,
+    absoluteCentSum: 0,
+    displayMeanAbsCents: null,
+    displayBucket: 0,
   },
   view: {
     mode: VIEW_MODE_GRAPH,
@@ -532,6 +553,7 @@ function setViewMode(mode) {
   state.view.hoverSample = null;
   hideHint();
   saveSettings();
+  trackViewModeSwitch(nextMode);
   updateModeControls();
   markBackgroundDirty();
   updateStatus();
@@ -540,6 +562,21 @@ function setViewMode(mode) {
 
 function toggleViewMode() {
   setViewMode(isTunerMode() ? VIEW_MODE_GRAPH : VIEW_MODE_TUNER);
+}
+
+function trackViewModeSwitch(mode) {
+  const gtag = window.gtag;
+  if (typeof gtag !== "function") {
+    return;
+  }
+
+  try {
+    gtag("event", "view_mode_switch", {
+      view_mode: mode === VIEW_MODE_TUNER ? "Tuner" : "Graph",
+    });
+  } catch (error) {
+    // Analytics must not affect realtime UI operation.
+  }
 }
 
 function updateModeControls() {
@@ -620,6 +657,16 @@ function resetTunerAverageState() {
   state.tunerAverage.timeSec = null;
 }
 
+function resetSustainedDeviationState() {
+  state.sustainedDeviation.noteMidi = null;
+  state.sustainedDeviation.startTimeSec = null;
+  state.sustainedDeviation.lastVoicedTimeSec = null;
+  state.sustainedDeviation.sampleCount = 0;
+  state.sustainedDeviation.absoluteCentSum = 0;
+  state.sustainedDeviation.displayMeanAbsCents = null;
+  state.sustainedDeviation.displayBucket = 0;
+}
+
 function updateTunerAverageForSample(sample) {
   sample.tunerAverageMidi = null;
   if (!sample.voiced || !Number.isFinite(sample.midiFloat)) {
@@ -665,6 +712,57 @@ function updateTunerAverageForSample(sample) {
   state.tunerAverage.timeSec = sample.timeSec;
   sample.tunerAverageMidi = nextAverage;
   return state.tunerAverage.noteMidi !== currentNoteMidi;
+}
+
+function updateSustainedDeviationForSample(sample) {
+  if (!sample || !Number.isFinite(sample.timeSec)) {
+    resetSustainedDeviationState();
+    return;
+  }
+
+  if (!sample.voiced || !Number.isFinite(sample.midiFloat)) {
+    const lastVoicedTimeSec = state.sustainedDeviation.lastVoicedTimeSec;
+    if (
+      lastVoicedTimeSec === null
+      || sample.timeSec - lastVoicedTimeSec > NOTE_ROLL_MAX_GAP_SEC
+    ) {
+      resetSustainedDeviationState();
+    }
+    return;
+  }
+
+  const noteMidi = clamp(Math.round(sample.midiFloat), HARD_MIN_MIDI, HARD_MAX_MIDI);
+  const sameSustainedNote = state.sustainedDeviation.noteMidi === noteMidi
+    && state.sustainedDeviation.lastVoicedTimeSec !== null
+    && sample.timeSec - state.sustainedDeviation.lastVoicedTimeSec <= NOTE_ROLL_MAX_GAP_SEC;
+
+  if (!sameSustainedNote) {
+    resetSustainedDeviationState();
+    state.sustainedDeviation.noteMidi = noteMidi;
+    state.sustainedDeviation.startTimeSec = sample.timeSec;
+  }
+
+  const absoluteCents = Math.abs((sample.midiFloat - noteMidi) * 100);
+  state.sustainedDeviation.lastVoicedTimeSec = sample.timeSec;
+  state.sustainedDeviation.sampleCount += 1;
+  state.sustainedDeviation.absoluteCentSum += absoluteCents;
+
+  const durationSec = sample.timeSec - state.sustainedDeviation.startTimeSec;
+  if (durationSec < SUSTAINED_DEVIATION_MIN_DURATION_SEC) {
+    state.sustainedDeviation.displayMeanAbsCents = null;
+    state.sustainedDeviation.displayBucket = 0;
+    return;
+  }
+
+  const displayBucket = Math.floor(durationSec / SUSTAINED_DEVIATION_UPDATE_INTERVAL_SEC);
+  if (
+    displayBucket > state.sustainedDeviation.displayBucket
+    || state.sustainedDeviation.displayMeanAbsCents === null
+  ) {
+    state.sustainedDeviation.displayMeanAbsCents = state.sustainedDeviation.absoluteCentSum
+      / Math.max(1, state.sustainedDeviation.sampleCount);
+    state.sustainedDeviation.displayBucket = displayBucket;
+  }
 }
 
 function recomputeTunerAverageSamples() {
@@ -850,6 +948,8 @@ function createRenderState() {
       confidenceThreshold: state.analysis.confidenceThreshold,
     },
     latestTimeSec: state.latestTimeSec,
+    currentNoteLabel: getCurrentNoteLabel(),
+    currentDeviationLabel: getSustainedDeviationLabel(),
     rightTime: getRightTime(),
   };
 }
@@ -1440,6 +1540,7 @@ function addPitchSample(timeSec, frequency, confidence) {
   };
 
   updateTunerAverageForSample(sample);
+  updateSustainedDeviationForSample(sample);
   state.pitchSamples.push(sample);
   queueRendererSample(sample);
   state.latestTimeSec = Math.max(state.latestTimeSec, timeSec);
@@ -1506,6 +1607,7 @@ function clearHistory() {
   state.modelQueue = new Float32Array(0);
   state.analysis.pendingQueueSkipSamples = 0;
   resetTunerAverageState();
+  resetSustainedDeviationState();
   clearRendererSamples();
   state.view.hoverSample = null;
   state.view.followNow = true;
@@ -1583,19 +1685,17 @@ function formatTimestamp(date) {
 }
 
 function setCurrentStatusColumns({
-  note = "--",
   cents = "",
   hz = "",
   midi = "",
   conf = "",
 } = {}) {
-  setText(els.currentNote, note);
   setText(els.currentCents, cents);
   setText(els.currentHz, hz);
   setText(els.currentMidi, midi);
   setText(els.currentConf, conf);
 
-  const summary = `Current: ${note} ${cents} ${hz} ${midi} ${conf}`.replace(/\s+/g, " ").trim();
+  const summary = `Current: ${cents} ${hz} ${midi} ${conf}`.replace(/\s+/g, " ").trim();
   setAttribute(els.currentStatus, "aria-label", summary);
   if (els.currentStatus.title !== summary) {
     els.currentStatus.title = summary;
@@ -1696,7 +1796,6 @@ function renderStatusNow() {
   if (current && current.voiced) {
     const sign = current.cents >= 0 ? "+" : "";
     setCurrentStatusColumns({
-      note: `${current.noteName}${current.octave}`,
       cents: `${sign}${current.cents.toFixed(0)} cent`,
       hz: `${current.frequency.toFixed(1)} Hz`,
       midi: `MIDI ${current.midiFloat.toFixed(2)}`,
@@ -1704,7 +1803,6 @@ function renderStatusNow() {
     });
   } else if (state.currentSample) {
     setCurrentStatusColumns({
-      note: "unvoiced",
       conf: `conf ${state.currentSample.confidence.toFixed(2)}`,
     });
   } else {
@@ -1720,6 +1818,32 @@ function renderStatusNow() {
   setRunningMessage();
   updateModeControls();
   updatePitchScrollbar();
+}
+
+function getCurrentNoteLabel() {
+  const current = state.currentSample && csvRowForSample(state.currentSample);
+  if (!current || !current.voiced) {
+    return "--";
+  }
+  return `${current.noteName}${current.octave}`;
+}
+
+function getSustainedDeviationLabel() {
+  const metric = state.sustainedDeviation;
+  const current = state.currentSample;
+  if (
+    !current
+    || !current.voiced
+    || !Number.isFinite(current.midiFloat)
+    || metric.displayMeanAbsCents === null
+    || metric.noteMidi !== clamp(Math.round(current.midiFloat), HARD_MIN_MIDI, HARD_MAX_MIDI)
+    || metric.lastVoicedTimeSec === null
+    || current.timeSec - metric.lastVoicedTimeSec > NOTE_ROLL_MAX_GAP_SEC
+  ) {
+    return "";
+  }
+
+  return `MAD ${metric.displayMeanAbsCents.toFixed(1)} cent`;
 }
 
 function updatePitchScrollbar() {
@@ -2014,6 +2138,8 @@ function drawTrace() {
 
   const tunerMode = isTunerMode();
   if (!tunerMode) {
+    drawDetectedNoteRoll(ctx, leftTime, rightTime, getEffectivePitchRange());
+
     let segmentOpen = false;
     let previous = null;
     ctx.lineWidth = 2.4;
@@ -2096,7 +2222,214 @@ function drawTrace() {
     ctx.strokeStyle = UI_THEME.traceWarm;
     ctx.stroke();
   }
+  drawCurrentNoteLabel(ctx, getCurrentNoteLabel(), getSustainedDeviationLabel());
   ctx.restore();
+}
+
+function drawDetectedNoteRoll(ctx, leftTime, rightTime, pitchRange) {
+  const noteEvents = detectGraphNoteEvents(leftTime, rightTime, pitchRange);
+  if (noteEvents.length === 0) {
+    return;
+  }
+
+  ctx.save();
+  ctx.shadowBlur = 0;
+  for (const event of noteEvents) {
+    const x1 = clamp(timeToX(event.startTime, rightTime), PITCH_AXIS_WIDTH, state.canvas.width);
+    const x2 = clamp(timeToX(event.endTime, rightTime), PITCH_AXIS_WIDTH, state.canvas.width);
+    const width = Math.max(NOTE_ROLL_MIN_WIDTH_PX, x2 - x1);
+    const yTop = midiToY(event.noteMidi + 0.45);
+    const yBottom = midiToY(event.noteMidi - 0.45);
+    const top = Math.min(yTop, yBottom);
+    const height = Math.max(2, Math.abs(yBottom - yTop));
+    const confidence = graphNoteConfidenceRatio(event.confidence);
+    const fillAlpha = clamp(0.10 + confidence * 0.25, 0.10, 0.35);
+    const edgeAlpha = clamp(fillAlpha + 0.10, 0.16, 0.42);
+
+    ctx.fillStyle = `rgba(${UI_THEME.noteRoll}, ${fillAlpha})`;
+    ctx.fillRect(x1, top, width, height);
+    ctx.fillStyle = `rgba(${UI_THEME.noteRollEdge}, ${edgeAlpha})`;
+    ctx.fillRect(x1, top, width, 1);
+    ctx.fillRect(x1, top + height - 1, width, 1);
+  }
+  ctx.restore();
+}
+
+function detectGraphNoteEvents(leftTime, rightTime, pitchRange) {
+  const events = [];
+  const threshold = getConfidenceThreshold();
+  let current = null;
+  let previousUsableTime = null;
+
+  for (const sample of state.pitchSamples) {
+    if (!sample || sample.timeSec < leftTime) {
+      continue;
+    }
+    if (sample.timeSec > rightTime) {
+      break;
+    }
+
+    if (!graphNoteSampleIsUsable(sample, threshold)) {
+      finishGraphNoteEvent(events, current, leftTime, rightTime);
+      current = null;
+      previousUsableTime = null;
+      continue;
+    }
+
+    const noteMidi = clamp(Math.round(sample.midiFloat), HARD_MIN_MIDI, HARD_MAX_MIDI);
+    const gap = previousUsableTime === null ? Infinity : sample.timeSec - previousUsableTime;
+    const sameEvent = current
+      && gap <= NOTE_ROLL_MAX_GAP_SEC
+      && Math.abs(sample.midiFloat - current.noteMidi) <= NOTE_ROLL_PITCH_TOLERANCE_MIDI;
+
+    if (!sameEvent) {
+      finishGraphNoteEvent(events, current, leftTime, rightTime);
+      current = startGraphNoteEvent(sample, noteMidi, threshold);
+    } else {
+      appendGraphNoteEvent(current, sample, threshold);
+    }
+
+    previousUsableTime = sample.timeSec;
+  }
+
+  finishGraphNoteEvent(events, current, leftTime, rightTime);
+  return events.filter((event) => graphNoteEventIntersectsPitchRange(event, pitchRange));
+}
+
+function graphNoteSampleIsUsable(sample, threshold) {
+  return sample.confidence >= threshold
+    && sample.frequency > 0
+    && Number.isFinite(sample.midiFloat)
+    && sample.midiFloat >= HARD_MIN_MIDI
+    && sample.midiFloat <= HARD_MAX_MIDI;
+}
+
+function startGraphNoteEvent(sample, noteMidi, threshold) {
+  const weight = graphNoteConfidenceWeight(sample.confidence, threshold);
+  return {
+    startTime: sample.timeSec,
+    lastTime: sample.timeSec,
+    noteMidi,
+    weightedMidi: sample.midiFloat * weight,
+    weightSum: weight,
+    confidenceSum: sample.confidence,
+    samples: 1,
+    stepSum: 0,
+    stepCount: 0,
+  };
+}
+
+function appendGraphNoteEvent(event, sample, threshold) {
+  const weight = graphNoteConfidenceWeight(sample.confidence, threshold);
+  const step = sample.timeSec - event.lastTime;
+  if (Number.isFinite(step) && step > 0) {
+    event.stepSum += step;
+    event.stepCount += 1;
+  }
+  event.lastTime = sample.timeSec;
+  event.weightedMidi += sample.midiFloat * weight;
+  event.weightSum += weight;
+  event.confidenceSum += sample.confidence;
+  event.samples += 1;
+  event.noteMidi = clamp(Math.round(event.weightedMidi / event.weightSum), HARD_MIN_MIDI, HARD_MAX_MIDI);
+}
+
+function finishGraphNoteEvent(events, event, leftTime, rightTime) {
+  if (!event || event.samples <= 0) {
+    return;
+  }
+
+  const confidence = event.confidenceSum / event.samples;
+  const duration = Math.max(0, event.lastTime - event.startTime);
+  if (duration < NOTE_ROLL_MIN_DURATION_SEC && event.samples < 2 && confidence < HIGH_CONFIDENCE_THRESHOLD) {
+    return;
+  }
+
+  const averageStep = event.stepCount > 0
+    ? clamp(event.stepSum / event.stepCount, 0.005, NOTE_ROLL_MAX_GAP_SEC)
+    : NOTE_ROLL_SINGLE_SAMPLE_SEC;
+  events.push({
+    startTime: Math.max(leftTime, event.startTime - averageStep * 0.5),
+    endTime: Math.min(rightTime, event.lastTime + averageStep * 0.5),
+    noteMidi: event.noteMidi,
+    confidence,
+  });
+}
+
+function graphNoteEventIntersectsPitchRange(event, pitchRange) {
+  return event.noteMidi + 0.5 >= pitchRange.minMidi
+    && event.noteMidi - 0.5 <= pitchRange.maxMidi
+    && event.endTime > event.startTime;
+}
+
+function graphNoteConfidenceWeight(confidence, threshold) {
+  return 0.25 + graphNoteConfidenceRatio(confidence, threshold) * 0.75;
+}
+
+function graphNoteConfidenceRatio(confidence, threshold = getConfidenceThreshold()) {
+  const usableSpan = Math.max(0.001, 1 - threshold);
+  return clamp((confidence - threshold) / usableSpan, 0, 1);
+}
+
+function getConfidenceThreshold() {
+  return state.analysis.confidenceThreshold;
+}
+
+function drawCurrentNoteLabel(ctx, noteLabel, deviationLabel = "") {
+  if (!noteLabel) {
+    return;
+  }
+
+  const x = PITCH_AXIS_WIDTH + 14;
+  const y = Math.max(34, state.canvas.height - 16);
+  ctx.save();
+  ctx.font = CURRENT_NOTE_LABEL_FONT;
+  ctx.textAlign = "left";
+  ctx.textBaseline = "alphabetic";
+  ctx.lineJoin = "round";
+  ctx.shadowColor = "rgba(0, 0, 0, 0.72)";
+  ctx.shadowBlur = 10;
+  ctx.lineWidth = 5;
+  ctx.strokeStyle = "rgba(7, 11, 16, 0.82)";
+  ctx.strokeText(noteLabel, x, y);
+  ctx.fillStyle = UI_THEME.labelStrong;
+  ctx.fillText(noteLabel, x, y);
+
+  if (deviationLabel) {
+    const noteWidth = measureTextWidth(ctx, noteLabel, noteLabel.length * 24);
+    const deviationX = x + noteWidth + CURRENT_DEVIATION_LABEL_GAP_PX;
+    const availableWidth = state.canvas.width - deviationX - 8;
+    if (availableWidth >= 68) {
+      ctx.font = currentDeviationLabelFont(CURRENT_DEVIATION_LABEL_FONT_SIZE);
+      const deviationWidth = measureTextWidth(ctx, deviationLabel, deviationLabel.length * 8);
+      if (deviationWidth > availableWidth) {
+        const scaledSize = clamp(
+          Math.floor(CURRENT_DEVIATION_LABEL_FONT_SIZE * (availableWidth / deviationWidth)),
+          12,
+          CURRENT_DEVIATION_LABEL_FONT_SIZE,
+        );
+        ctx.font = currentDeviationLabelFont(scaledSize);
+      }
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = "rgba(7, 11, 16, 0.78)";
+      ctx.strokeText(deviationLabel, deviationX, y - 2);
+      ctx.fillStyle = UI_THEME.label;
+      ctx.fillText(deviationLabel, deviationX, y - 2);
+    }
+  }
+  ctx.restore();
+}
+
+function currentDeviationLabelFont(size) {
+  return `700 ${size}px ${CURRENT_DEVIATION_LABEL_FONT_FAMILY}`;
+}
+
+function measureTextWidth(ctx, text, fallbackWidth) {
+  if (typeof ctx.measureText !== "function") {
+    return fallbackWidth;
+  }
+  const metrics = ctx.measureText(text);
+  return metrics && Number.isFinite(metrics.width) ? metrics.width : fallbackWidth;
 }
 
 function drawTunerAverageTrace(ctx, leftTime, rightTime) {
@@ -2674,6 +3007,7 @@ function bindEvents() {
         && sample.confidence >= state.analysis.confidenceThreshold;
     }
     recomputeTunerAverageSamples();
+    resetSustainedDeviationState();
     replaceRendererSamples();
     saveSettings();
     const pitchRangeChanged = autoScrollPitchToSample(state.currentSample);
