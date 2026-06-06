@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Realtime F0 and pitch piano-roll visualizer for voice and monophonic instruments.">
+    <meta name="theme-color" content="#0b0f16">
+    <meta name="application-name" content="Frieve F0 Estimator">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Frieve F0">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="Frieve F0 Estimator">
+    <meta property="og:title" content="Frieve F0 Estimator">
+    <meta property="og:description" content="Realtime F0 and pitch piano-roll visualizer for voice and monophonic instruments.">
+    <meta property="og:image" content="assets/ogp.png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Frieve F0 Estimator">
+    <meta name="twitter:description" content="Realtime F0 and pitch piano-roll visualizer for voice and monophonic instruments.">
+    <meta name="twitter:image" content="assets/ogp.png">
+    <title>Frieve F0 Estimator</title>
+    <link rel="manifest" href="manifest.webmanifest">
+    <link rel="icon" type="image/png" sizes="32x32" href="assets/icons/favicon-32.png">
+    <link rel="apple-touch-icon" href="assets/icons/apple-touch-icon.png">
+    <link rel="stylesheet" href="styles.css">
+    <script src="app.js?v=6" defer></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true">
+            <span></span>
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+          <div class="brand-copy">
+            <h1>Frieve F0 Estimator</h1>
+          </div>
+        </div>
+        <div class="toolbar" aria-label="Controls">
+          <button id="modeToggleBtn" class="action-button mode-button" type="button" title="Switch to Tuner" aria-label="Mode: Graph">
+            <span class="mode-button-label">Mode</span>
+            <span id="modeValue">Graph</span>
+          </button>
+          <button id="pauseBtn" class="action-button icon-action" type="button" disabled title="Pause" aria-label="Pause">⏸</button>
+          <button id="clearBtn" class="action-button" type="button">Clear</button>
+          <button id="exportBtn" class="action-button icon-action" type="button" disabled title="Download CSV" aria-label="Download CSV">
+            <svg class="button-icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+              <path d="M10 3v9m0 0 4-4m-4 4-4-4M4 15.5h12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path>
+            </svg>
+          </button>
+          <span class="toolbar-divider" aria-hidden="true"></span>
+          <span class="zoom-axis-icon" aria-hidden="true">
+            <svg viewBox="0 0 20 20" focusable="false">
+              <path d="M3 10h14M7 6 3 10l4 4M13 6l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"></path>
+            </svg>
+          </span>
+          <div class="segmented" aria-label="Time zoom">
+            <button id="timeZoomOutBtn" type="button" title="Zoom time out">−</button>
+            <button id="timeZoomInBtn" type="button" title="Zoom time in">+</button>
+          </div>
+          <span class="zoom-axis-icon" aria-hidden="true">
+            <svg viewBox="0 0 20 20" focusable="false">
+              <path d="M10 3v14M6 7l4-4 4 4M6 13l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"></path>
+            </svg>
+          </span>
+          <div class="segmented" aria-label="Pitch zoom">
+            <button id="pitchZoomOutBtn" type="button" title="Zoom pitch out">−</button>
+            <button id="pitchZoomInBtn" type="button" title="Zoom pitch in">+</button>
+          </div>
+          <label class="threshold-control">
+            <span>Conf</span>
+            <output id="thresholdValue">0.50</output>
+            <input id="thresholdInput" type="range" min="0.05" max="0.95" step="0.01" value="0.50">
+          </label>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <section class="roll-panel" aria-label="Pitch piano roll">
+          <div id="canvasWrap" class="canvas-wrap">
+            <canvas id="backgroundCanvas"></canvas>
+            <canvas id="traceCanvas"></canvas>
+            <div id="hoverHint" class="hover-hint" hidden></div>
+            <div
+              id="pitchScrollbar"
+              class="pitch-scrollbar"
+              role="scrollbar"
+              aria-label="Pitch range"
+              aria-orientation="vertical"
+              aria-valuemin="24"
+              aria-valuemax="96"
+              aria-valuenow="62"
+            >
+              <div id="pitchScrollbarThumb" class="pitch-scrollbar-thumb"></div>
+            </div>
+            <div id="startOverlay" class="start-overlay">
+              <div class="start-stack">
+                <div class="start-visual" aria-hidden="true">
+                  <span></span>
+                  <span></span>
+                  <span></span>
+                  <span></span>
+                  <span></span>
+                </div>
+                <button id="overlayStartBtn" class="primary large" type="button">Start Mic</button>
+                <p>Ready for the next take.</p>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <footer class="statusbar">
+        <div id="currentStatus" class="status-primary current-status" aria-label="Current: --">
+          <span class="current-status-label">Current:</span>
+          <span id="currentNote" class="current-status-cell current-status-note">--</span>
+          <span id="currentCents" class="current-status-cell current-status-number"></span>
+          <span id="currentHz" class="current-status-cell current-status-number"></span>
+          <span id="currentMidi" class="current-status-cell current-status-number"></span>
+          <span id="currentConf" class="current-status-cell current-status-number"></span>
+        </div>
+        <div id="rangeStatus">Range: --</div>
+        <div id="windowStatus">Window: --</div>
+        <div id="engineBadge" class="engine-badge">CREPE</div>
+        <a class="status-link" href="https://github.com/Frieve-A/f0estimator" target="_blank" rel="noopener noreferrer">GitHub</a>
+        <div id="messageStatus" class="status-message">Idle</div>
+      </footer>
+    </div>
+  </body>
+</html>
