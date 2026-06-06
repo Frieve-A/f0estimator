@@ -13,7 +13,7 @@ const HARD_MAX_MIDI = 96;
 const MIN_PITCH_SPAN = 12;
 const VIEW_MODE_GRAPH = "graph";
 const VIEW_MODE_TUNER = "tuner";
-const RENDERER_WORKER_URL = "renderer-worker.js?v=11";
+const RENDERER_WORKER_URL = "renderer-worker.js?v=12";
 const TUNER_DEFAULT_CENTER_MIDI = 69;
 const TUNER_HALF_RANGE_MIDI = 0.5;
 const TUNER_CENT_GRID_STEP = 10;
@@ -37,6 +37,8 @@ const CURRENT_DEVIATION_LABEL_FONT_FAMILY = "ui-sans-serif, system-ui, sans-seri
 const CURRENT_DEVIATION_LABEL_GAP_PX = 16;
 const PITCH_AUTO_SCROLL_MARGIN_MIDI = 1.5;
 const GRAPH_TAP_MOVE_PX = 6;
+const RANGE_LONG_PRESS_MS = 420;
+const RANGE_SELECTION_MIN_SIZE_PX = 4;
 const SCROLLBAR_TIME_CLEARANCE_PX = 4;
 const TARGET_INFERENCE_LOAD = 0.7;
 const INFERENCE_EWMA_ALPHA = 0.12;
@@ -82,6 +84,8 @@ const UI_THEME = {
   tunerAverage: "#ffcf4a",
   now: "#ff4d8d",
   hoverFill: "#f7f4ec",
+  selectionFill: "rgba(37, 223, 210, 0.13)",
+  selectionStroke: "rgba(255, 207, 74, 0.82)",
 };
 
 const els = {
@@ -160,6 +164,7 @@ const state = {
     hoverPosition: { x: 0, y: 0 },
     pointerDrag: null,
     pitchScrollbarDrag: null,
+    selectionRange: null,
   },
   analysis: {
     sampleRateInput: 0,
@@ -551,6 +556,7 @@ function setViewMode(mode) {
   }
 
   state.view.hoverSample = null;
+  state.view.selectionRange = null;
   hideHint();
   saveSettings();
   trackViewModeSwitch(nextMode);
@@ -864,6 +870,19 @@ function compactRenderSample(sample) {
   };
 }
 
+function compactSelectionRange(range) {
+  if (!range) {
+    return null;
+  }
+
+  return {
+    left: Number.isFinite(range.left) ? range.left : 0,
+    top: Number.isFinite(range.top) ? range.top : 0,
+    width: Number.isFinite(range.width) ? range.width : 0,
+    height: Number.isFinite(range.height) ? range.height : 0,
+  };
+}
+
 function queueRendererSample(sample) {
   if (!state.renderer.useWorker) {
     return;
@@ -943,6 +962,7 @@ function createRenderState() {
       followNow: state.view.followNow,
       manualRightTime: state.view.manualRightTime,
       hoverSample: compactRenderSample(state.view.hoverSample),
+      selectionRange: compactSelectionRange(state.view.selectionRange),
     },
     analysis: {
       confidenceThreshold: state.analysis.confidenceThreshold,
@@ -1610,6 +1630,7 @@ function clearHistory() {
   resetSustainedDeviationState();
   clearRendererSamples();
   state.view.hoverSample = null;
+  state.view.selectionRange = null;
   state.view.followNow = true;
   state.view.manualRightTime = state.view.visibleSeconds;
   els.exportBtn.disabled = true;
@@ -2222,7 +2243,35 @@ function drawTrace() {
     ctx.strokeStyle = UI_THEME.traceWarm;
     ctx.stroke();
   }
+  drawSelectionRange(ctx);
   drawCurrentNoteLabel(ctx, getCurrentNoteLabel(), getSustainedDeviationLabel());
+  ctx.restore();
+}
+
+function drawSelectionRange(ctx) {
+  const range = state.view.selectionRange;
+  if (!range || range.width <= 0 || range.height <= 0) {
+    return;
+  }
+
+  const left = clamp(range.left, PITCH_AXIS_WIDTH, state.canvas.width);
+  const top = clamp(range.top, 0, state.canvas.height);
+  const width = clamp(range.width, 0, state.canvas.width - left);
+  const height = clamp(range.height, 0, state.canvas.height - top);
+  if (width <= 0 || height <= 0) {
+    return;
+  }
+
+  ctx.save();
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = UI_THEME.selectionFill;
+  ctx.fillRect(left, top, width, height);
+  ctx.strokeStyle = UI_THEME.selectionStroke;
+  ctx.lineWidth = 1.4;
+  ctx.setLineDash([5, 4]);
+  ctx.beginPath();
+  ctx.rect(left + 0.5, top + 0.5, Math.max(0, width - 1), Math.max(0, height - 1));
+  ctx.stroke();
   ctx.restore();
 }
 
@@ -2856,46 +2905,223 @@ function isPrimaryMouseOrNonMousePointer(event) {
   return event.pointerType !== "mouse" || event.button === 0;
 }
 
+function canvasPointFromPointerEvent(event) {
+  const rect = els.canvasWrap.getBoundingClientRect();
+  return clampCanvasPoint(event.clientX - rect.left, event.clientY - rect.top);
+}
+
+function clampCanvasPoint(x, y) {
+  return {
+    x: clamp(x, PITCH_AXIS_WIDTH, state.canvas.width),
+    y: clamp(y, 0, state.canvas.height),
+  };
+}
+
+function selectionRangeFromPoints(startX, startY, endX, endY) {
+  const start = clampCanvasPoint(startX, startY);
+  const end = clampCanvasPoint(endX, endY);
+  const left = Math.min(start.x, end.x);
+  const right = Math.max(start.x, end.x);
+  const top = Math.min(start.y, end.y);
+  const bottom = Math.max(start.y, end.y);
+  const timeA = xToTime(left);
+  const timeB = xToTime(right);
+  const midiA = yToMidi(top);
+  const midiB = yToMidi(bottom);
+
+  return {
+    left,
+    top,
+    width: right - left,
+    height: bottom - top,
+    timeMin: Math.min(timeA, timeB),
+    timeMax: Math.max(timeA, timeB),
+    midiMin: Math.min(midiA, midiB),
+    midiMax: Math.max(midiA, midiB),
+  };
+}
+
+function selectionHasUsableArea(range) {
+  return Boolean(range)
+    && range.width >= RANGE_SELECTION_MIN_SIZE_PX
+    && range.height >= RANGE_SELECTION_MIN_SIZE_PX;
+}
+
+function clearSelectionRange() {
+  state.view.selectionRange = null;
+}
+
+function scheduleRangeLongPress(drag) {
+  if (drag.pointerType === "mouse") {
+    return;
+  }
+
+  const setTimer = window.setTimeout || (typeof setTimeout === "function" ? setTimeout : null);
+  if (typeof setTimer !== "function") {
+    return;
+  }
+
+  drag.longPressTimerId = setTimer(() => {
+    if (state.view.pointerDrag !== drag || drag.mode !== "pending") {
+      return;
+    }
+    drag.longPressTimerId = null;
+    startRangeSelection(drag, {
+      x: drag.currentX,
+      y: drag.currentY,
+    });
+  }, RANGE_LONG_PRESS_MS);
+}
+
+function clearRangeLongPressTimer(drag) {
+  if (!drag || drag.longPressTimerId === null || drag.longPressTimerId === undefined) {
+    return;
+  }
+
+  const clearTimer = window.clearTimeout || (typeof clearTimeout === "function" ? clearTimeout : null);
+  if (typeof clearTimer === "function") {
+    clearTimer(drag.longPressTimerId);
+  }
+  drag.longPressTimerId = null;
+}
+
+function startRangeSelection(drag, point) {
+  clearRangeLongPressTimer(drag);
+  drag.mode = "selection";
+  drag.moved = true;
+  state.view.hoverSample = null;
+  updateRangeSelection(drag, point);
+}
+
+function updateRangeSelection(drag, point) {
+  drag.currentX = point.x;
+  drag.currentY = point.y;
+  state.view.selectionRange = selectionRangeFromPoints(
+    drag.startX,
+    drag.startY,
+    drag.currentX,
+    drag.currentY,
+  );
+  showSelectionHint(state.view.selectionRange, drag.currentX, drag.currentY);
+  draw();
+}
+
+function startPanDrag(drag) {
+  clearRangeLongPressTimer(drag);
+  drag.mode = "pan";
+  drag.moved = true;
+  state.view.hoverSample = null;
+  clearSelectionRange();
+  hideHint();
+}
+
+function updatePanDrag(event, drag) {
+  const dx = event.clientX - drag.lastClientX;
+  const dy = event.clientY - drag.lastClientY;
+  drag.lastClientX = event.clientX;
+  drag.lastClientY = event.clientY;
+
+  const pixelsPerSecond = Math.max(1, state.canvas.width - PITCH_AXIS_WIDTH) / state.view.visibleSeconds;
+  if (Math.abs(dx) > 0) {
+    panTime(-dx / pixelsPerSecond);
+  }
+
+  if (!isTunerMode() && Math.abs(dy) > 0) {
+    const midiPerPixel = (state.view.maxMidi - state.view.minMidi) / Math.max(1, state.canvas.height);
+    panPitch(dy * midiPerPixel);
+  }
+}
+
+function releasePointerCaptureIfNeeded(event) {
+  if (
+    event
+    && els.canvasWrap
+    && typeof els.canvasWrap.releasePointerCapture === "function"
+  ) {
+    try {
+      els.canvasWrap.releasePointerCapture(event.pointerId);
+    } catch (error) {
+      // Pointer capture may already be released by the browser.
+    }
+  }
+}
+
 function handlePointerDown(event) {
   if (!isPrimaryMouseOrNonMousePointer(event)) {
     return;
   }
-  if (event.target.closest("button, input, .pitch-scrollbar")) {
+  if (event.target && event.target.closest("button, input, .pitch-scrollbar")) {
     return;
   }
-  els.canvasWrap.setPointerCapture(event.pointerId);
+  const point = canvasPointFromPointerEvent(event);
+  const hadSelection = Boolean(state.view.selectionRange);
+  clearSelectionRange();
+  state.view.hoverSample = null;
+  hideHint();
+
+  if (typeof els.canvasWrap.setPointerCapture === "function") {
+    els.canvasWrap.setPointerCapture(event.pointerId);
+  }
   state.view.pointerDrag = {
     pointerId: event.pointerId,
-    startX: event.clientX,
-    startY: event.clientY,
-    lastX: event.clientX,
-    lastY: event.clientY,
+    pointerType: event.pointerType || "mouse",
+    mode: "pending",
+    startX: point.x,
+    startY: point.y,
+    currentX: point.x,
+    currentY: point.y,
+    startClientX: event.clientX,
+    startClientY: event.clientY,
+    lastClientX: event.clientX,
+    lastClientY: event.clientY,
+    longPressTimerId: null,
     moved: false,
   };
+
+  if (event.shiftKey) {
+    event.preventDefault();
+    startRangeSelection(state.view.pointerDrag, point);
+    return;
+  }
+
+  scheduleRangeLongPress(state.view.pointerDrag);
+  if (hadSelection) {
+    draw();
+  }
 }
 
 function handlePointerMove(event) {
   if (state.view.pointerDrag && state.view.pointerDrag.pointerId === event.pointerId) {
     const drag = state.view.pointerDrag;
-    const dx = event.clientX - drag.lastX;
-    const dy = event.clientY - drag.lastY;
-    const totalDistance = Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY);
-    drag.lastX = event.clientX;
-    drag.lastY = event.clientY;
+    const point = canvasPointFromPointerEvent(event);
 
-    if (totalDistance <= GRAPH_TAP_MOVE_PX) {
+    if (drag.mode === "selection") {
+      event.preventDefault();
+      updateRangeSelection(drag, point);
       return;
     }
-    drag.moved = true;
 
-    const pixelsPerSecond = Math.max(1, state.canvas.width - PITCH_AXIS_WIDTH) / state.view.visibleSeconds;
-    if (Math.abs(dx) > 0) {
-      panTime(-dx / pixelsPerSecond);
+    drag.currentX = point.x;
+    drag.currentY = point.y;
+
+    if (drag.mode === "pending" && event.shiftKey) {
+      event.preventDefault();
+      startRangeSelection(drag, point);
+      return;
     }
 
-    if (!isTunerMode() && Math.abs(dy) > 0) {
-      const midiPerPixel = (state.view.maxMidi - state.view.minMidi) / Math.max(1, state.canvas.height);
-      panPitch(dy * midiPerPixel);
+    const totalDistance = Math.hypot(event.clientX - drag.startClientX, event.clientY - drag.startClientY);
+    if (drag.mode === "pending" && totalDistance <= GRAPH_TAP_MOVE_PX) {
+      return;
+    }
+
+    if (drag.mode === "pending") {
+      startPanDrag(drag);
+    }
+
+    if (drag.mode === "pan") {
+      event.preventDefault();
+      updatePanDrag(event, drag);
     }
     return;
   }
@@ -2906,6 +3132,27 @@ function handlePointerMove(event) {
 function handlePointerUp(event) {
   if (state.view.pointerDrag && state.view.pointerDrag.pointerId === event.pointerId) {
     const drag = state.view.pointerDrag;
+    clearRangeLongPressTimer(drag);
+    releasePointerCaptureIfNeeded(event);
+
+    if (drag.mode === "selection") {
+      event.preventDefault();
+      if (event.type === "pointercancel") {
+        clearSelectionRange();
+        hideHint();
+        draw();
+      } else {
+        updateRangeSelection(drag, canvasPointFromPointerEvent(event));
+        if (!selectionHasUsableArea(state.view.selectionRange)) {
+          clearSelectionRange();
+          hideHint();
+          draw();
+        }
+      }
+      state.view.pointerDrag = null;
+      return;
+    }
+
     state.view.pointerDrag = null;
     if (!drag.moved && event.type !== "pointercancel" && isPrimaryMouseOrNonMousePointer(event)) {
       event.preventDefault();
@@ -2923,6 +3170,7 @@ function updateHover(event) {
   let nearest = null;
   let bestDistance = Infinity;
 
+  clearSelectionRange();
   for (const sample of state.pitchSamples) {
     if (!sampleIsVisible(sample, leftTime, rightTime)) {
       continue;
@@ -2955,6 +3203,7 @@ function showHint(sample, x, y) {
   }
 
   const sign = row.cents >= 0 ? "+" : "";
+  els.hoverHint.classList.remove("selection-hint");
   els.hoverHint.innerHTML = [
     `Time: ${row.timeSec.toFixed(3)} s`,
     `Note: ${row.noteName}${row.octave} ${sign}${row.cents.toFixed(1)} cent`,
@@ -2962,18 +3211,162 @@ function showHint(sample, x, y) {
     `MIDI: ${row.midiFloat.toFixed(3)}`,
     `Confidence: ${row.confidence.toFixed(2)}`,
   ].join("<br>");
+  positionHint(x, y);
+}
 
+function showSelectionHint(range, x, y) {
+  const threshold = getSelectionConfidenceThreshold();
+  const samples = selectionHasUsableArea(range)
+    ? highConfidenceSamplesInSelection(range, threshold)
+    : [];
+  els.hoverHint.classList.add("selection-hint");
+  els.hoverHint.innerHTML = selectionHintHtml(range, samples, threshold);
+  positionHint(x, y);
+}
+
+function selectionHintHtml(range, samples, threshold) {
+  const meta = `<div class="hover-hint-meta">Conf &ge; ${threshold.toFixed(2)} / n=${samples.length}</div>`;
+  if (!selectionHasUsableArea(range)) {
+    return [
+      `<div class="hover-hint-title">Selection</div>`,
+      `<div class="hover-hint-empty">Drag to set range</div>`,
+      meta,
+    ].join("");
+  }
+
+  if (samples.length === 0) {
+    return [
+      `<div class="hover-hint-title">Selection</div>`,
+      `<div class="hover-hint-empty">No high-confidence pitch</div>`,
+      meta,
+    ].join("");
+  }
+
+  const stats = selectionPitchStats(samples);
+  return [
+    `<div class="hover-hint-title">Selection</div>`,
+    `<table class="selection-stats">`,
+    `<thead><tr><th scope="col"></th><th scope="col">Note</th><th scope="col">Hz</th><th scope="col">MIDI</th><th scope="col">Cent</th></tr></thead>`,
+    `<tbody>`,
+    selectionPitchRowHtml("Upper", stats.upper),
+    selectionPitchRowHtml("Lower", stats.lower),
+    selectionMadRowHtml(stats),
+    `</tbody>`,
+    `</table>`,
+    meta,
+  ].join("");
+}
+
+function highConfidenceSamplesInSelection(range, threshold) {
+  const samples = [];
+  for (const sample of state.pitchSamples) {
+    if (
+      !sample
+      || sample.timeSec < range.timeMin
+      || sample.timeSec > range.timeMax
+      || sample.confidence < threshold
+      || sample.frequency <= 0
+      || !Number.isFinite(sample.midiFloat)
+      || sample.midiFloat < range.midiMin
+      || sample.midiFloat > range.midiMax
+    ) {
+      continue;
+    }
+    samples.push(sample);
+  }
+  return samples;
+}
+
+function getSelectionConfidenceThreshold() {
+  return Math.max(state.analysis.confidenceThreshold, HIGH_CONFIDENCE_THRESHOLD);
+}
+
+function selectionPitchStats(samples) {
+  const byMidi = [...samples].sort((a, b) => a.midiFloat - b.midiFloat);
+  const midiValues = samples.map((sample) => sample.midiFloat);
+  const frequencyValues = samples.map((sample) => sample.frequency);
+  return {
+    lower: byMidi[0],
+    upper: byMidi[byMidi.length - 1],
+    madHz: medianAbsoluteDeviation(frequencyValues),
+    madMidi: medianAbsoluteDeviation(midiValues),
+    madCent: medianAbsoluteDeviation(midiValues) * 100,
+  };
+}
+
+function selectionPitchRowHtml(label, sample) {
+  const note = noteInfoFromMidi(sample.midiFloat);
+  return [
+    `<tr>`,
+    `<th scope="row">${label}</th>`,
+    `<td>${note.name}${note.octave}</td>`,
+    `<td>${sample.frequency.toFixed(2)}</td>`,
+    `<td>${sample.midiFloat.toFixed(3)}</td>`,
+    `<td>${formatSignedNumber(note.cents, 1)}</td>`,
+    `</tr>`,
+  ].join("");
+}
+
+function selectionMadRowHtml(stats) {
+  return [
+    `<tr>`,
+    `<th scope="row">MAD</th>`,
+    `<td>&mdash;</td>`,
+    `<td>${stats.madHz.toFixed(2)}</td>`,
+    `<td>${stats.madMidi.toFixed(3)}</td>`,
+    `<td>${stats.madCent.toFixed(1)}</td>`,
+    `</tr>`,
+  ].join("");
+}
+
+function medianAbsoluteDeviation(values) {
+  if (values.length === 0) {
+    return 0;
+  }
+  const center = median(values);
+  return median(values.map((value) => Math.abs(value - center)));
+}
+
+function median(values) {
+  if (values.length === 0) {
+    return 0;
+  }
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  if (sorted.length % 2 === 1) {
+    return sorted[middle];
+  }
+  return (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
+function formatSignedNumber(value, decimals) {
+  const sign = value >= 0 ? "+" : "";
+  return `${sign}${value.toFixed(decimals)}`;
+}
+
+function positionHint(x, y) {
   const offset = 12;
+  els.hoverHint.hidden = false;
   const hintRect = els.hoverHint.getBoundingClientRect();
-  const left = clamp(x + offset, 6, state.canvas.width - hintRect.width - 6);
-  const top = clamp(y + offset, 6, state.canvas.height - hintRect.height - 6);
+  const hintWidth = hintRect.width || (els.hoverHint.classList.contains("selection-hint") ? 360 : 178);
+  const hintHeight = hintRect.height || (els.hoverHint.classList.contains("selection-hint") ? 150 : 92);
+  const maxLeft = Math.max(6, state.canvas.width - hintWidth - 6);
+  const maxTop = Math.max(6, state.canvas.height - hintHeight - 6);
+  const preferredLeft = x + offset + hintWidth > state.canvas.width - 6
+    ? x - hintWidth - offset
+    : x + offset;
+  const preferredTop = y + offset + hintHeight > state.canvas.height - 6
+    ? y - hintHeight - offset
+    : y + offset;
+  const left = clamp(preferredLeft, 6, maxLeft);
+  const top = clamp(preferredTop, 6, maxTop);
   els.hoverHint.style.left = `${left}px`;
   els.hoverHint.style.top = `${top}px`;
-  els.hoverHint.hidden = false;
 }
 
 function hideHint() {
   els.hoverHint.hidden = true;
+  els.hoverHint.classList.remove("selection-hint");
 }
 
 function handleVisibilityChange() {
@@ -3029,6 +3422,9 @@ function bindEvents() {
   els.canvasWrap.addEventListener("pointerup", handlePointerUp);
   els.canvasWrap.addEventListener("pointercancel", handlePointerUp);
   els.canvasWrap.addEventListener("pointerleave", () => {
+    if (state.view.pointerDrag || state.view.selectionRange) {
+      return;
+    }
     state.view.hoverSample = null;
     hideHint();
     draw();

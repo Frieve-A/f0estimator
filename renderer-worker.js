@@ -48,6 +48,8 @@ const UI_THEME = {
   tunerAverage: "#ffcf4a",
   now: "#ff4d8d",
   hoverFill: "#f7f4ec",
+  selectionFill: "rgba(37, 223, 210, 0.13)",
+  selectionStroke: "rgba(255, 207, 74, 0.82)",
 };
 
 const state = {
@@ -497,7 +499,35 @@ function drawTrace() {
     ctx.strokeStyle = UI_THEME.traceWarm;
     ctx.stroke();
   }
+  drawSelectionRange(ctx);
   drawCurrentNoteLabel(ctx, state.renderState.currentNoteLabel, state.renderState.currentDeviationLabel);
+  ctx.restore();
+}
+
+function drawSelectionRange(ctx) {
+  const range = state.renderState.view.selectionRange;
+  if (!range || range.width <= 0 || range.height <= 0) {
+    return;
+  }
+
+  const left = clamp(range.left, PITCH_AXIS_WIDTH, state.canvas.width);
+  const top = clamp(range.top, 0, state.canvas.height);
+  const width = clamp(range.width, 0, state.canvas.width - left);
+  const height = clamp(range.height, 0, state.canvas.height - top);
+  if (width <= 0 || height <= 0) {
+    return;
+  }
+
+  ctx.save();
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = UI_THEME.selectionFill;
+  ctx.fillRect(left, top, width, height);
+  ctx.strokeStyle = UI_THEME.selectionStroke;
+  ctx.lineWidth = 1.4;
+  ctx.setLineDash([5, 4]);
+  ctx.beginPath();
+  ctx.rect(left + 0.5, top + 0.5, Math.max(0, width - 1), Math.max(0, height - 1));
+  ctx.stroke();
   ctx.restore();
 }
 

@@ -497,6 +497,7 @@ canvas {
   position: absolute;
   z-index: 5;
   min-width: 178px;
+  max-width: calc(100% - 12px);
   padding: 9px 11px;
   border: 1px solid rgba(37, 223, 210, 0.45);
   border-radius: 8px;
@@ -510,6 +511,65 @@ canvas {
   pointer-events: none;
   font-variant-numeric: tabular-nums;
   backdrop-filter: blur(10px);
+}
+
+.hover-hint.selection-hint {
+  min-width: min(370px, calc(100% - 12px));
+  padding: 10px 11px 9px;
+  border-color: rgba(255, 207, 74, 0.58);
+  background: rgba(9, 13, 19, 0.86);
+}
+
+.hover-hint-title {
+  margin-bottom: 7px;
+  color: var(--accent-2);
+  font-size: 0.72rem;
+  font-weight: 820;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.selection-stats {
+  width: 100%;
+  border-collapse: collapse;
+  color: var(--ink);
+  font-size: 0.72rem;
+  line-height: 1.28;
+}
+
+.selection-stats th,
+.selection-stats td {
+  padding: 3px 5px;
+  border-top: 1px solid rgba(255, 255, 255, 0.09);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.selection-stats thead th {
+  border-top: 0;
+  color: var(--muted-2);
+  font-size: 0.66rem;
+  font-weight: 760;
+}
+
+.selection-stats th:first-child,
+.selection-stats td:first-child {
+  text-align: left;
+}
+
+.selection-stats tbody th {
+  color: var(--accent);
+  font-weight: 780;
+}
+
+.hover-hint-meta,
+.hover-hint-empty {
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+
+.hover-hint-meta {
+  margin-top: 7px;
 }
 
 .start-overlay {

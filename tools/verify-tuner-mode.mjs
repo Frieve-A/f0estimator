@@ -28,6 +28,7 @@ function createElement(id) {
     clientHeight: id === "pitchScrollbar" ? 420 : 0,
     disabled: false,
     hidden: false,
+    innerHTML: "",
     style: {},
     textContent: "",
     title: "",
@@ -45,6 +46,8 @@ function createElement(id) {
     closest() {
       return null;
     },
+    setPointerCapture() {},
+    releasePointerCapture() {},
     getBoundingClientRect() {
       if (id === "canvasWrap") {
         return { left: 0, top: 0, right: 800, width: 800, height: 420 };
@@ -54,6 +57,11 @@ function createElement(id) {
       }
       if (id === "pitchScrollbarThumb") {
         return { left: 782, top: 8, right: 792, width: 10, height: 80 };
+      }
+      if (id === "hoverHint") {
+        return element.classList.contains("selection-hint")
+          ? { left: 0, top: 0, right: 360, width: 360, height: 150 }
+          : { left: 0, top: 0, right: 178, width: 178, height: 92 };
       }
       return { left: 0, top: 0, right: 0, width: 0, height: 0 };
     },
@@ -216,6 +224,24 @@ function click(id) {
   });
 }
 
+function canvasPointer(type, overrides = {}) {
+  const handler = eventHandlers.get(`canvasWrap:${type}`);
+  assert(handler, `missing ${type} handler for canvasWrap`);
+  handler({
+    type,
+    pointerId: 1,
+    pointerType: "mouse",
+    button: 0,
+    clientX: 0,
+    clientY: 0,
+    shiftKey: false,
+    target: elements.get("canvasWrap"),
+    preventDefault() {},
+    stopPropagation() {},
+    ...overrides,
+  });
+}
+
 context.setMicState("running");
 assert(
   elements.get("messageStatus").textContent === "Running (10.0 ms hop, max res)",
@@ -369,5 +395,41 @@ assert(
   !noteRollRects.some((rect) => containsY(rect, e4Y)),
   "Graph note detection should ignore samples below the confidence threshold",
 );
+
+elements.get("thresholdInput").value = "0.50";
+thresholdInputHandler();
+context.clearHistory();
+context.addPitchSample(0, c4Frequency, 0.95);
+context.addPitchSample(0.5, e4Frequency, 0.74);
+context.addPitchSample(1, g4Frequency, 0.96);
+const rightTime = context.getRightTime();
+const selectLeft = context.timeToX(0, rightTime);
+const selectRight = context.timeToX(2, rightTime);
+const selectTop = context.midiToY(68);
+const selectBottom = context.midiToY(59);
+canvasPointer("pointerdown", {
+  shiftKey: true,
+  clientX: selectLeft,
+  clientY: selectTop,
+});
+canvasPointer("pointermove", {
+  shiftKey: true,
+  clientX: selectRight,
+  clientY: selectBottom,
+});
+canvasPointer("pointerup", {
+  shiftKey: true,
+  clientX: selectRight,
+  clientY: selectBottom,
+});
+const selectionHint = elements.get("hoverHint");
+assert(selectionHint.hidden === false, "range selection should show a tooltip hint");
+assert(selectionHint.classList.contains("selection-hint"), "range selection should use the table hint style");
+assert(selectionHint.innerHTML.includes("Upper"), "selection hint should include the upper pitch row");
+assert(selectionHint.innerHTML.includes("Lower"), "selection hint should include the lower pitch row");
+assert(selectionHint.innerHTML.includes("MAD"), "selection hint should include the MAD row");
+assert(selectionHint.innerHTML.includes("G4"), "selection hint should include the high pitch note name");
+assert(selectionHint.innerHTML.includes("C4"), "selection hint should include the low pitch note name");
+assert(selectionHint.innerHTML.includes("n=2"), "selection stats should ignore pitches below the high-confidence threshold");
 
 console.log("verify-tuner-mode ok");

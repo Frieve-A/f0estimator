@@ -45,6 +45,7 @@ try {
   const afterTimeZoom = await readUiState(page);
   await page.click("#pitchZoomInBtn");
   const afterPitchZoom = await readUiState(page);
+  const selectionCheck = await verifySelectionHint(page);
   let afterMicStart = null;
 
   if (verifyMic) {
@@ -92,6 +93,9 @@ try {
   if (afterTimeZoom.rangeStatus === afterPitchZoom.rangeStatus) {
     failures.push("pitch zoom button did not change the range status");
   }
+  if (!selectionCheck.ok) {
+    failures.push(`selection hint failed: ${selectionCheck.reason}`);
+  }
   if (verifyMic && afterMicStart) {
     if (afterMicStart.messageIsError) {
       failures.push(`mic start failed: ${afterMicStart.messageStatus}`);
@@ -114,6 +118,7 @@ try {
     before,
     afterTimeZoom,
     afterPitchZoom,
+    selectionCheck,
     afterMicStart,
     screenshot: verifyMic ? null : screenshot,
     failures,
@@ -125,6 +130,85 @@ try {
   }
 } finally {
   await browser.close();
+}
+
+async function verifySelectionHint(page) {
+  return page.evaluate(async () => {
+    if (
+      typeof window.clearHistory !== "function"
+      || typeof window.addPitchSample !== "function"
+      || typeof window.getRightTime !== "function"
+      || typeof window.timeToX !== "function"
+      || typeof window.midiToY !== "function"
+    ) {
+      return { ok: false, reason: "pitch helpers are not exposed" };
+    }
+
+    const thresholdInput = document.getElementById("thresholdInput");
+    thresholdInput.value = "0.50";
+    thresholdInput.dispatchEvent(new Event("input", { bubbles: true }));
+    window.clearHistory();
+
+    const frequencyFromMidi = (midi) => 440 * (2 ** ((midi - 69) / 12));
+    window.addPitchSample(0, frequencyFromMidi(60), 0.95);
+    window.addPitchSample(0.5, frequencyFromMidi(64), 0.74);
+    window.addPitchSample(1, frequencyFromMidi(67), 0.96);
+
+    const canvasWrap = document.getElementById("canvasWrap");
+    const rect = canvasWrap.getBoundingClientRect();
+    const rightTime = window.getRightTime();
+    const start = {
+      x: window.timeToX(0, rightTime),
+      y: window.midiToY(68),
+    };
+    const end = {
+      x: window.timeToX(2, rightTime),
+      y: window.midiToY(59),
+    };
+    const eventBase = {
+      pointerId: 77,
+      pointerType: "mouse",
+      button: 0,
+      buttons: 1,
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true,
+    };
+    canvasWrap.dispatchEvent(new PointerEvent("pointerdown", {
+      ...eventBase,
+      clientX: rect.left + start.x,
+      clientY: rect.top + start.y,
+    }));
+    canvasWrap.dispatchEvent(new PointerEvent("pointermove", {
+      ...eventBase,
+      clientX: rect.left + end.x,
+      clientY: rect.top + end.y,
+    }));
+    canvasWrap.dispatchEvent(new PointerEvent("pointerup", {
+      ...eventBase,
+      buttons: 0,
+      clientX: rect.left + end.x,
+      clientY: rect.top + end.y,
+    }));
+
+    const hint = document.getElementById("hoverHint");
+    const html = hint.innerHTML;
+    const ok = !hint.hidden
+      && hint.classList.contains("selection-hint")
+      && html.includes("Upper")
+      && html.includes("Lower")
+      && html.includes("MAD")
+      && html.includes("G4")
+      && html.includes("C4")
+      && html.includes("n=2");
+    return {
+      ok,
+      reason: ok ? "" : "selection table did not contain expected rows",
+      hidden: hint.hidden,
+      hasClass: hint.classList.contains("selection-hint"),
+      html,
+    };
+  });
 }
 
 async function readUiState(page) {
