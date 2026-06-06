@@ -9,11 +9,11 @@ const FRAME_SIZE = 1024;
 const FRAME_CENTER_MS = (FRAME_SIZE / 2 / MODEL_SAMPLE_RATE) * 1000;
 const MAX_HISTORY_SECONDS = 10 * 60;
 const HARD_MIN_MIDI = 24;
-const HARD_MAX_MIDI = 96;
+const HARD_MAX_MIDI = 108;
 const MIN_PITCH_SPAN = 12;
 const VIEW_MODE_GRAPH = "graph";
 const VIEW_MODE_TUNER = "tuner";
-const RENDERER_WORKER_URL = "renderer-worker.js?v=12";
+const RENDERER_WORKER_URL = "renderer-worker.js?v=13";
 const TUNER_DEFAULT_CENTER_MIDI = 69;
 const TUNER_HALF_RANGE_MIDI = 0.5;
 const TUNER_CENT_GRID_STEP = 10;
@@ -394,7 +394,7 @@ function activationToPitch(activations) {
 
 function yinEstimate(frame, sampleRate) {
   const minFrequency = 32.7;
-  const maxFrequency = 1975.5;
+  const maxFrequency = midiToFrequency(HARD_MAX_MIDI);
   const minTau = Math.max(2, Math.floor(sampleRate / maxFrequency));
   const maxTau = Math.min(Math.floor(sampleRate / minFrequency), Math.floor(frame.length / 2));
   const difference = new Float32Array(maxTau + 1);
@@ -1893,6 +1893,8 @@ function updatePitchScrollbar() {
   if (els.pitchScrollbarThumb.style.transform !== nextTransform) {
     els.pitchScrollbarThumb.style.transform = nextTransform;
   }
+  setAttribute(els.pitchScrollbar, "aria-valuemin", String(HARD_MIN_MIDI));
+  setAttribute(els.pitchScrollbar, "aria-valuemax", String(HARD_MAX_MIDI));
   setAttribute(els.pitchScrollbar, "aria-valuenow", ariaNow);
   setAttribute(els.pitchScrollbar, "aria-valuetext", ariaText);
 }

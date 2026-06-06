@@ -259,7 +259,14 @@ context.setMessage("Idle");
 assert(elements.get("modeValue").textContent === "Graph", "initial mode should be Graph");
 assert(elements.get("pitchZoomInBtn").disabled === false, "pitch zoom in should start enabled");
 assert(elements.get("pitchZoomOutBtn").disabled === false, "pitch zoom out should start enabled");
+assert(elements.get("rangeStatus").textContent.includes("E2-C6"), "default graph range should stay E2-C6");
+assert(elements.get("pitchScrollbar").getAttribute("aria-valuemax") === "108", "pitch scrollbar should expose the C8 display ceiling");
 assert(analyticsEvents.length === 0, "initial mode restore should not send mode analytics");
+
+for (let i = 0; i < 6; i += 1) {
+  click("pitchZoomOutBtn");
+}
+assert(elements.get("rangeStatus").textContent.includes("C1-C8"), "graph pitch zoom should reach the C8 display ceiling");
 
 click("modeToggleBtn");
 assert(elements.get("modeValue").textContent === "Tuner", "mode should switch to Tuner");
