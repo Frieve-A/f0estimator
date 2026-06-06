@@ -6,6 +6,8 @@ A browser-only web app for real-time F0 display, pitch graphing, and compact tun
 
 [Open the app](https://frieve-a.github.io/f0estimator/)
 
+[Support the project](https://ko-fi.com/frievea)
+
 ## Current Status
 
 - Default `Graph` mode shows a piano-roll pitch history for voice and monophonic instruments.
@@ -79,6 +81,8 @@ Before using CREPE/PitchCREPE-family models or Essentia-family libraries for com
 ブラウザ完結のリアルタイムF0表示、ピッチグラフ表示、簡易チューナー表示Webアプリです。
 
 [アプリを開く](https://frieve-a.github.io/f0estimator/)
+
+[プロジェクトを支援する](https://ko-fi.com/frievea)
 
 ### 最新状況
 
