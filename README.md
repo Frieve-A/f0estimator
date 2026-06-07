@@ -2,43 +2,52 @@
 
 (Japanese below)
 
-A browser-only web app for real-time F0 display, pitch graphing, and compact tuner-style cent tracking.
-
 [Open the app](https://frieve-a.github.io/f0estimator/)
 
 [Support the project](https://ko-fi.com/frievea)
 
-## Current Status
+## Overview
 
-- Default `Graph` mode shows a piano-roll pitch history for voice and monophonic instruments.
-- `Tuner` mode is available from the `Mode` button. It centers the display on the detected note, shows a +/-50 cent window with 10-cent guide lines, draws raw detections as points, and overlays a smoothed average trace.
-- The tuner center follows high-confidence detections. Before a usable detection is available, it defaults to A4.
-- The graph canvas in both display modes draws the current detected note name in the lower-left graph area. After the same note is sustained for at least 1 second, a `MAD x.x cent` readout appears to the right of the note label. MAD is the mean absolute cent deviation from the nearest note, updates on 1-second boundaries, and resets when the detected note changes or voiced detections are interrupted for more than 0.32 seconds.
-- In `Graph` mode, Shift+drag or long-press drag selects a time/pitch range. A translucent tooltip table summarizes high-confidence pitches in the selection with upper, lower, and MAD values in note name, Hz, MIDI, and cent units; MAD is omitted for note names.
-- Pitch zoom, vertical pan, and the pitch scrollbar are disabled in `Tuner` mode because the vertical range is fixed to the current +/-50 cent view. Time zoom and horizontal navigation remain available.
-- Inference starts at a 10 ms hop and adapts up to 250 ms when the device cannot keep up. The status bar reports `max res`, `adapting`, `catch-up`, `limited`, or `stable`.
-- Rendering uses an OffscreenCanvas Web Worker when supported, with a main-thread canvas fallback.
-- The app includes a web manifest and service worker for installable/offline app-shell behavior.
+Frieve F0 Estimator helps you see how the pitch of a voice or single-note instrument changes over time. You can use live microphone input or upload an audio file from your device.
+
+Use `Graph` mode when you want to review pitch movement over time. Use `Tuner` mode when you want a focused view of the current note and how sharp or flat it is.
 
 ## Features
 
-- Estimates monophonic F0 from microphone input
-- Resamples input audio to 16 kHz
-- Runs inference with a PitchCREPE-compatible CREPE model
-- Displays a piano-roll canvas with automatic current-time follow while estimating
-- Switches between `Graph` and `Tuner` display modes
-- Supports Pause / Resume and Clear
-- Supports vertical and horizontal zoom, vertical and horizontal pan, and confidence threshold adjustment in `Graph` mode
-- Supports tuner-style cent tracking with smoothed average trace in `Tuner` mode
-- Shows the lower-left current note label and sustained-note MAD readout
-- Shows hover hints and range-selection stats hints
-- Exports CSV data
+### Analyze Audio
+
+- Start live pitch tracking from the microphone.
+- Upload a local audio file and view its pitch analysis on the graph.
+- Cancel an upload while it is processing to keep the previous graph.
+- Pause, resume, or clear the current session.
+
+### Graph Mode
+
+- Review pitch as a piano-roll style history.
+- Zoom and pan through time and pitch range.
+- Use the `Conf` slider to hide less certain detections.
+- Select a region of the graph to inspect its high/low pitch and pitch variation.
+- Hover over points to inspect individual observations.
+
+### Tuner Mode
+
+- See the detected note and cent offset in a focused tuner view.
+- Follow the detected note as you sing or play.
+- Review the smoothed pitch trace around the current note.
+
+### Readouts and Export
+
+- See the current detected note in the graph area.
+- See a stability readout for notes held for at least 1 second.
+- Export pitch observations as CSV.
 
 ## Running
 
-Serve the whole directory from an HTTPS URL or localhost, then open `index.html`. Microphone input and service worker registration require a secure context.
+The easiest way to use the app is the hosted version:
 
-For a quick local check:
+[Open the app](https://frieve-a.github.io/f0estimator/)
+
+For a local copy, serve this directory from localhost or HTTPS, then open it in a browser. Microphone access will not work from a plain `file://` page.
 
 ```sh
 python -m http.server 4173
@@ -46,11 +55,26 @@ python -m http.server 4173
 
 Then open `http://localhost:4173/`.
 
-## Inference
+## Verification
 
-In the browser, the app loads the CREPE model with TensorFlow.js. Following the PitchCREPE specification, inference input is 16 kHz and output values `time_sec`, `f0_hz`, and `confidence` are converted to MIDI values. The graph display can scroll up to C8. The current CREPE model output itself is effectively limited near the B6/C7 area, while the YIN fallback searches up to the C8 display ceiling. The app begins at a 10 ms hop and can adapt the hop up to 250 ms under load. If model loading fails, the app starts with a YIN fallback so the UI can still be checked.
+The repository includes lightweight checks for browser UI behavior, Tuner mode logic, range selection, and upload state handling.
 
-## CSV
+```sh
+node tools/verify-tuner-mode.mjs
+node tools/verify-browser.mjs http://localhost:4173
+```
+
+`tools/verify-tuner-mode.mjs` checks the shared lower-left current note label, sustained-note MAD visibility/update/reset behavior, range-selection stats hint behavior, and mocked upload success/Cancel restoration. `tools/verify-browser.mjs` requires Playwright to be available in the local Node environment. Set `VERIFY_MIC=1` to include a fake-microphone startup check.
+
+## Developer Notes
+
+### Inference
+
+In the browser, the app loads the CREPE model with TensorFlow.js. Following the PitchCREPE specification, inference input is 16 kHz and output values `time_sec`, `f0_hz`, and `confidence` are converted to MIDI values.
+
+The graph display can scroll up to C8. The current CREPE model output itself is effectively limited near the B6/C7 area, while the YIN fallback searches up to the C8 display ceiling. Realtime inference begins at a 10 ms hop and can adapt the hop up to 250 ms under load. Uploaded audio is decoded by the browser, analyzed offline through the same pitch pipeline, and uses the same 10-minute retained-history limit as the realtime graph.
+
+### CSV
 
 `Export CSV` outputs the following columns.
 
@@ -60,18 +84,11 @@ time_sec,f0_hz,midi_float,note_name,octave,cents_from_nearest,confidence,voiced
 
 `voiced` is determined by the current confidence threshold and the C1-C8 hard range.
 
-## Verification
+### Rendering and Offline Shell
 
-The repository currently includes lightweight checks for browser UI behavior and Tuner mode logic.
+Rendering uses an OffscreenCanvas Web Worker when supported, with a main-thread canvas fallback. The app includes a web manifest and service worker for installable/offline app-shell behavior.
 
-```sh
-node tools/verify-tuner-mode.mjs
-node tools/verify-browser.mjs http://localhost:4173
-```
-
-`tools/verify-tuner-mode.mjs` also checks the shared lower-left current note label, sustained-note MAD visibility/update/reset behavior, and range-selection stats hint behavior. `tools/verify-browser.mjs` requires Playwright to be available in the local Node environment. Set `VERIFY_MIC=1` to include a fake-microphone startup check.
-
-## License Notes
+### License Notes
 
 Before using CREPE/PitchCREPE-family models or Essentia-family libraries for commercial distribution, SaaS, or paid services, check the license of each model and library individually.
 
@@ -79,45 +96,54 @@ Before using CREPE/PitchCREPE-family models or Essentia-family libraries for com
 
 ## 日本語
 
-ブラウザ完結のリアルタイムF0表示、ピッチグラフ表示、簡易チューナー表示Webアプリです。
-
 [アプリを開く](https://frieve-a.github.io/f0estimator/)
 
 [紹介記事: 〖音楽〗リアルタイム音程可視化アプリ「Frieve F0 Estimator」作ってみた](https://note.com/frievea/n/n68ba2af8696e)
 
 [プロジェクトを支援する](https://ko-fi.com/frievea)
 
-### 最新状況
+### 概要
 
-- 初期状態の `Graph` モードでは、声や単音楽器向けのピアノロール型ピッチ履歴を表示します。
-- `Mode` ボタンから `Tuner` モードへ切り替えられます。検出音を中心に、+/-50 cent の範囲、10 centごとのガイド、瞬時検出点、平滑化した平均トレースを表示します。
-- Tunerの中心音は高confidenceの検出に追従します。有効な検出がまだない場合はA4を中心にします。
-- 両方の表示モードで、現在の検出音名をグラフ左下に大きく表示します。同じ音が1秒以上継続すると、音名の右側に `MAD x.x cent` を表示します。MADは最近傍音からの絶対cent偏差の平均で、1秒境界ごとに更新され、検出音が変わるか有効な検出が0.32秒超途切れるとリセットされます。
-- `Graph` モードでは、Shift+ドラッグまたはロングタップ後のドラッグで時間/ピッチ範囲を選択できます。選択内の高confidenceピッチについて、上限、下限、MADを音名、Hz、MIDI、cent単位の半透明tooltip表に表示します。音名のMADは省略します。
-- `Tuner` モードでは縦方向の範囲が現在音の +/-50 cent に固定されるため、ピッチズーム、縦パン、ピッチスクロールバーは無効になります。時間ズームと横方向の移動は利用できます。
-- 推論は10ms hopから開始し、端末性能や処理負荷に応じて最大250msまで自動調整します。ステータスバーには `max res`、`adapting`、`catch-up`、`limited`、`stable` を表示します。
-- 描画は対応ブラウザではOffscreenCanvas Web Workerを使い、非対応環境ではメインスレッドCanvasへfallbackします。
-- web manifestとservice workerを含み、インストール可能なPWA風のapp shellキャッシュに対応しています。
+Frieve F0 Estimatorは、声や単音楽器の音の高さが時間とともにどう動くかを確認するためのWebアプリです。マイク入力を使うことも、手元の音声ファイルをアップロードすることもできます。
+
+`Graph` モードでは音程の動きを時間軸で確認できます。`Tuner` モードでは、今の音名と、基準の音からどれくらい高いか低いかを集中的に確認できます。
 
 ### 機能
 
-- マイク入力から単音のF0を推定
-- 入力音声を16kHzへリサンプリング
-- PitchCREPE互換のCREPEモデル推論
-- 推定中は現在時刻へ自動追従するピアノロールCanvas表示
-- `Graph` / `Tuner` 表示モード切り替え
-- Pause / Resume、Clear
-- `Graph` モードでの縦横ズーム、縦横パン、confidence threshold調整
-- `Tuner` モードでのcent表示と平均トレース
-- 左下の現在音名表示と継続音MAD表示
-- hover hintと範囲選択統計hint
-- CSVエクスポート
+#### 音声を解析する
+
+- マイクからリアルタイムに音程を確認できます。
+- ローカル音声ファイルをアップロードし、解析結果をグラフで確認できます。
+- アップロード処理中に `Cancel` すると、処理前のグラフを維持できます。
+- Pause、Resume、Clearに対応します。
+
+#### Graphモード
+
+- 音程の履歴をピアノロール風のグラフで確認できます。
+- 時間方向と音域方向をズーム、パンできます。
+- `Conf` スライダーで、不確かな検出を表示しにくくできます。
+- グラフ範囲を選択して、その範囲の高い音、低い音、音程のばらつきを確認できます。
+- 点にマウスを重ねると、個別の観測値を確認できます。
+
+#### Tunerモード
+
+- 検出された音名とcent単位のズレを、チューナー風の表示で確認できます。
+- 歌ったり演奏したりしている音に表示が追従します。
+- 現在音の周辺で、平滑化された音程の動きを確認できます。
+
+#### 表示と出力
+
+- グラフ上に現在の検出音名を表示します。
+- 1秒以上伸ばした音では、音程の安定度を示す表示が出ます。
+- 観測データをCSVとしてエクスポートできます。
 
 ### 実行
 
-ディレクトリ全体をHTTPS URLまたはlocalhostで配信し、`index.html` を開いてください。マイク入力とservice worker登録にはsecure contextが必要です。
+通常は公開版を開くだけで使えます。
 
-ローカル確認例:
+[アプリを開く](https://frieve-a.github.io/f0estimator/)
+
+ローカルで動かす場合は、このディレクトリをlocalhostまたはHTTPSで配信してブラウザで開いてください。`file://` で直接開くと、マイク入力は使えません。
 
 ```sh
 python -m http.server 4173
@@ -125,11 +151,26 @@ python -m http.server 4173
 
 その後、`http://localhost:4173/` を開きます。
 
-### 推論
+### 検証
 
-ブラウザではTensorFlow.jsでCREPEモデルを読み込みます。PitchCREPEの仕様に合わせ、推論入力は16kHz、出力は `time_sec`、`f0_hz`、`confidence` をもとにMIDI値へ変換します。グラフ表示はC8までスクロールできます。現在のCREPEモデル出力自体は実質的にB6/C7付近までで、YIN fallbackは表示上限に合わせてC8まで探索します。hopは10msから開始し、処理負荷に応じて最大250msまで自動調整します。モデル取得に失敗した場合は、アプリの操作確認用にYIN fallbackで起動します。
+ブラウザUIの基本動作、Tunerモードロジック、範囲選択、Upload状態処理を確認する軽量スクリプトがあります。
 
-### CSV
+```sh
+node tools/verify-tuner-mode.mjs
+node tools/verify-browser.mjs http://localhost:4173
+```
+
+`tools/verify-tuner-mode.mjs` では、共通の左下の現在音名表示、継続音MADの表示・更新・リセット動作、範囲選択統計hint、Upload成功/Cancel復元のモック検証も確認します。`tools/verify-browser.mjs` の実行には、ローカルのNode環境でPlaywrightが使える必要があります。`VERIFY_MIC=1` を指定するとfake microphoneでの起動確認も含めます。
+
+### 開発者向け情報
+
+#### 推論
+
+ブラウザではTensorFlow.jsでCREPEモデルを読み込みます。PitchCREPEの仕様に合わせ、推論入力は16kHz、出力は `time_sec`、`f0_hz`、`confidence` をもとにMIDI値へ変換します。
+
+グラフ表示はC8までスクロールできます。現在のCREPEモデル出力自体は実質的にB6/C7付近までで、YIN fallbackは表示上限に合わせてC8まで探索します。リアルタイム推論のhopは10msから開始し、処理負荷に応じて最大250msまで自動調整します。アップロード音声はブラウザでデコードし、同じピッチ推定パイプラインでオフライン解析します。保持履歴はリアルタイム表示と同じく最大10分です。
+
+#### CSV
 
 `Export CSV` は以下のカラムを出力します。
 
@@ -139,17 +180,10 @@ time_sec,f0_hz,midi_float,note_name,octave,cents_from_nearest,confidence,voiced
 
 `voiced` は現在のconfidence thresholdとC1-C8のhard rangeで判定します。
 
-### 検証
+#### 描画とオフラインapp shell
 
-ブラウザUIの基本動作とTunerモードロジックを確認する軽量スクリプトがあります。
+描画は対応ブラウザではOffscreenCanvas Web Workerを使い、非対応環境ではメインスレッドCanvasへfallbackします。web manifestとservice workerを含み、インストール可能なPWA風のapp shellキャッシュに対応しています。
 
-```sh
-node tools/verify-tuner-mode.mjs
-node tools/verify-browser.mjs http://localhost:4173
-```
+#### ライセンス注意
 
-`tools/verify-tuner-mode.mjs` では、共通の左下の現在音名表示、継続音MADの表示・更新・リセット動作、範囲選択統計hintも確認します。`tools/verify-browser.mjs` の実行には、ローカルのNode環境でPlaywrightが使える必要があります。`VERIFY_MIC=1` を指定するとfake microphoneでの起動確認も含めます。
-
-### ライセンス注意
-
-CREPE/PitchCREPE系モデルやEssentia系ライブラリを商用配布・SaaS・有償提供で使う場合は、利用するモデルとライブラリのライセンスを個別に確認してください。
+CREPE/PitchCREPE系モデルやEssentia系ライブラリを商用配布、SaaS、有償提供で使う場合は、利用するモデルとライブラリのライセンスを個別に確認してください。

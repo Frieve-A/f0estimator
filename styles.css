@@ -45,6 +45,18 @@ input {
   font: inherit;
 }
 
+.visually-hidden-file {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 button {
   display: inline-flex;
   align-items: center;
@@ -324,6 +336,7 @@ button.large {
   font-size: 0.95rem;
 }
 
+#uploadBtn,
 #exportBtn {
   width: 38px;
   min-width: 38px;
@@ -511,6 +524,77 @@ canvas {
   pointer-events: none;
   font-variant-numeric: tabular-nums;
   backdrop-filter: blur(10px);
+}
+
+.upload-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(3, 7, 12, 0.44);
+  backdrop-filter: blur(4px);
+  pointer-events: auto;
+}
+
+.upload-overlay[hidden] {
+  display: none;
+}
+
+.upload-progress-panel {
+  display: grid;
+  width: min(360px, 100%);
+  gap: 12px;
+  padding: 18px;
+  border: 1px solid rgba(37, 223, 210, 0.42);
+  border-radius: 8px;
+  background: rgba(9, 13, 19, 0.92);
+  box-shadow:
+    0 18px 44px rgba(0, 0, 0, 0.42),
+    0 0 28px rgba(37, 223, 210, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.upload-progress-label {
+  color: var(--ink);
+  font-size: 0.88rem;
+  font-weight: 780;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.upload-progress-track {
+  height: 10px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.upload-progress-bar {
+  width: 0%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent-2), var(--accent));
+  box-shadow: 0 0 16px rgba(37, 223, 210, 0.35);
+  transition: width 140ms ease;
+}
+
+.upload-progress-percent {
+  color: var(--accent-2);
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 760;
+  text-align: right;
+}
+
+.upload-cancel-button {
+  justify-self: center;
+  min-width: 88px;
+  border-color: rgba(255, 101, 112, 0.58);
+  color: var(--danger);
 }
 
 .hover-hint.selection-hint {
@@ -841,6 +925,7 @@ canvas {
     padding: 0 8px;
   }
 
+  #uploadBtn,
   #exportBtn {
     width: 34px;
     min-width: 34px;

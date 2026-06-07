@@ -87,6 +87,15 @@ try {
   if (before.canvasReadbackAvailable && before.nonBackgroundPixels < 20) {
     failures.push("background canvas appears blank");
   }
+  if (!before.uploadButtonVisible) {
+    failures.push("upload button is not visible");
+  }
+  if (Math.abs(before.uploadButtonWidth - before.exportButtonWidth) > 1) {
+    failures.push(`upload button width ${before.uploadButtonWidth} did not match export button width ${before.exportButtonWidth}`);
+  }
+  if (!before.uploadOverlayHidden) {
+    failures.push("upload overlay should be hidden on first load");
+  }
   if (before.windowStatus === afterTimeZoom.windowStatus) {
     failures.push("time zoom button did not change the window status");
   }
@@ -214,6 +223,10 @@ async function verifySelectionHint(page) {
 async function readUiState(page) {
   return page.evaluate(() => {
     const canvas = document.getElementById("backgroundCanvas");
+    const uploadBtn = document.getElementById("uploadBtn");
+    const exportBtn = document.getElementById("exportBtn");
+    const uploadRect = uploadBtn.getBoundingClientRect();
+    const exportRect = exportBtn.getBoundingClientRect();
     let nonBackgroundPixels = 0;
     let canvasReadbackAvailable = true;
 
@@ -243,6 +256,10 @@ async function readUiState(page) {
       messageIsError: document.getElementById("messageStatus").classList.contains("error"),
       overlayVisible: !document.getElementById("startOverlay").hidden,
       overlayHidden: document.getElementById("startOverlay").hidden,
+      uploadButtonVisible: uploadRect.width > 0 && uploadRect.height > 0,
+      uploadButtonWidth: uploadRect.width,
+      exportButtonWidth: exportRect.width,
+      uploadOverlayHidden: document.getElementById("uploadOverlay").hidden,
       pauseEnabled: !document.getElementById("pauseBtn").disabled,
       exportEnabled: !document.getElementById("exportBtn").disabled,
       isSecureContext: window.isSecureContext,

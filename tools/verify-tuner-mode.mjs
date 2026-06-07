@@ -33,10 +33,14 @@ function createElement(id) {
     textContent: "",
     title: "",
     value: "",
+    parentElement: null,
+    tagName: id.endsWith("Input") ? "INPUT" : "BUTTON",
     classList: createClassList(),
     addEventListener(type, handler) {
       eventHandlers.set(`${id}:${type}`, handler);
     },
+    click() {},
+    focus() {},
     setAttribute(name, value) {
       attrs.set(name, String(value));
     },
@@ -141,6 +145,8 @@ const elementIds = [
   "overlayStartBtn",
   "pauseBtn",
   "clearBtn",
+  "uploadBtn",
+  "uploadInput",
   "exportBtn",
   "timeZoomInBtn",
   "timeZoomOutBtn",
@@ -161,12 +167,18 @@ const elementIds = [
   "backgroundCanvas",
   "traceCanvas",
   "hoverHint",
+  "uploadOverlay",
+  "uploadProgressLabel",
+  "uploadProgressBar",
+  "uploadProgressPercent",
+  "cancelUploadBtn",
   "pitchScrollbar",
   "pitchScrollbarThumb",
   "startOverlay",
 ];
 
 const elements = new Map(elementIds.map((id) => [id, createElement(id)]));
+elements.get("uploadProgressBar").parentElement = createElement("uploadProgressTrack");
 const analyticsEvents = [];
 
 const context = {
@@ -198,6 +210,11 @@ const context = {
   },
   requestAnimationFrame: () => 1,
   cancelAnimationFrame() {},
+  setTimeout: (handler) => {
+    handler();
+    return 1;
+  },
+  clearTimeout() {},
   Blob: class {},
   URL: {
     createObjectURL: () => "blob:test",
@@ -257,11 +274,112 @@ context.setMicState("idle");
 context.setMessage("Idle");
 
 assert(elements.get("modeValue").textContent === "Graph", "initial mode should be Graph");
+assert(elements.get("uploadBtn").disabled === false, "upload should start enabled");
 assert(elements.get("pitchZoomInBtn").disabled === false, "pitch zoom in should start enabled");
 assert(elements.get("pitchZoomOutBtn").disabled === false, "pitch zoom out should start enabled");
 assert(elements.get("rangeStatus").textContent.includes("E2-C6"), "default graph range should stay E2-C6");
 assert(elements.get("pitchScrollbar").getAttribute("aria-valuemax") === "108", "pitch scrollbar should expose the C8 display ceiling");
 assert(analyticsEvents.length === 0, "initial mode restore should not send mode analytics");
+
+const uploadAudio = new Float32Array(2048);
+for (let i = 0; i < uploadAudio.length; i += 1) {
+  uploadAudio[i] = Math.sin((2 * Math.PI * 440 * i) / 16000);
+}
+context.mockDecodedAudioBuffer = {
+  sampleRate: 16000,
+  length: uploadAudio.length,
+  numberOfChannels: 1,
+  getChannelData: () => uploadAudio,
+};
+context.window.AudioContext = class {
+  constructor() {
+    this.state = "running";
+  }
+
+  async decodeAudioData() {
+    return context.mockDecodedAudioBuffer;
+  }
+
+  async close() {
+    this.state = "closed";
+  }
+};
+
+await vm.runInContext(`(async () => {
+  state.engine = {
+    kind: "mock",
+    estimate: async () => ({ frequency: 440, confidence: 0.95 }),
+  };
+  clearHistory();
+  addPitchSample(0, 261.6255653005986, 0.9);
+  state.view.visibleSeconds = 12;
+  state.view.minMidi = 48;
+  state.view.maxMidi = 72;
+  await processUploadedAudio({
+    name: "mock.wav",
+    arrayBuffer: async () => new ArrayBuffer(16),
+  });
+  if (state.pitchSamples.length !== 7) {
+    throw new Error("upload should replace previous observations with analyzed frames");
+  }
+  if (state.pitchSamples.some((sample) => Math.abs(sample.frequency - 440) > 0.001)) {
+    throw new Error("upload samples should come from the uploaded analysis");
+  }
+  if (state.view.visibleSeconds !== 12 || state.view.minMidi !== 48 || state.view.maxMidi !== 72) {
+    throw new Error("upload should preserve zoom and pitch range");
+  }
+  if (state.view.followNow !== false || state.view.manualRightTime !== state.view.visibleSeconds) {
+    throw new Error("upload should scroll the time axis to the beginning");
+  }
+  if (els.startOverlay.hidden !== true || els.exportBtn.disabled !== false) {
+    throw new Error("upload result should be visible and exportable");
+  }
+
+  clearHistory();
+  addPitchSample(0, 329.6275569128699, 0.9);
+  state.audioContext = {
+    state: "running",
+    suspend() {
+      this.state = "suspended";
+      return Promise.resolve();
+    },
+  };
+  setMicState("running");
+  const uploadPromise = processUploadedAudio({
+    name: "cancel.wav",
+    arrayBuffer: () => new Promise((resolve) => setTimeout(() => resolve(new ArrayBuffer(16)), 0)),
+  });
+  cancelUploadProcessing();
+  await uploadPromise;
+  if (state.micState !== "paused") {
+    throw new Error("cancelled upload should leave running input paused");
+  }
+  if (state.pitchSamples.length !== 1 || Math.abs(state.pitchSamples[0].frequency - 329.6275569128699) > 0.001) {
+    throw new Error("cancelled upload should restore previous observations");
+  }
+  if (els.uploadOverlay.hidden !== true || els.cancelUploadBtn.hidden !== true || els.uploadBtn.disabled !== false) {
+    throw new Error("cancelled upload should unlock the UI");
+  }
+})()`, context);
+
+context.clearHistory();
+context.setMicState("idle");
+context.setMessage("Idle");
+vm.runInContext(`
+  state.audioContext = null;
+  state.view.mode = VIEW_MODE_GRAPH;
+  state.view.visibleSeconds = 10;
+  state.view.minMidi = DEFAULT_VOCAL_MIN_MIDI;
+  state.view.maxMidi = DEFAULT_VOCAL_MAX_MIDI;
+  state.view.tunerCenterMidi = null;
+  state.analysis.confidenceThreshold = 0.5;
+  els.thresholdInput.value = "0.50";
+  els.thresholdValue.value = "0.50";
+  resetTunerAverageState();
+  resetSustainedDeviationState();
+  updateModeControls();
+  updateStatus();
+`, context);
 
 for (let i = 0; i < 6; i += 1) {
   click("pitchZoomOutBtn");

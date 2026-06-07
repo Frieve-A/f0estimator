@@ -36,7 +36,7 @@
       gtag("js", new Date());
       gtag("config", "G-P7PK35NHTP");
     </script>
-    <script src="app.js?v=13" defer></script>
+    <script src="app.js?v=14" defer></script>
   </head>
   <body>
     <div class="app-shell">
@@ -59,6 +59,12 @@
           </button>
           <button id="pauseBtn" class="action-button icon-action" type="button" disabled title="Pause" aria-label="Pause">⏸</button>
           <button id="clearBtn" class="action-button" type="button">Clear</button>
+          <button id="uploadBtn" class="action-button icon-action" type="button" title="Upload audio" aria-label="Upload audio">
+            <svg class="button-icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+              <path d="M10 17V8m0 0 4 4m-4-4-4 4M4 4.5h12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path>
+            </svg>
+          </button>
+          <input id="uploadInput" class="visually-hidden-file" type="file" accept="audio/*,.wav,.mp3,.m4a,.aac,.ogg,.flac,.webm">
           <button id="exportBtn" class="action-button icon-action" type="button" disabled title="Download CSV" aria-label="Download CSV">
             <svg class="button-icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
               <path d="M10 3v9m0 0 4-4m-4 4-4-4M4 15.5h12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path>
@@ -97,6 +103,16 @@
             <canvas id="backgroundCanvas"></canvas>
             <canvas id="traceCanvas"></canvas>
             <div id="hoverHint" class="hover-hint" hidden></div>
+            <div id="uploadOverlay" class="upload-overlay" hidden aria-live="polite">
+              <div class="upload-progress-panel" role="status" aria-label="Upload processing">
+                <div id="uploadProgressLabel" class="upload-progress-label">Processing audio</div>
+                <div class="upload-progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                  <div id="uploadProgressBar" class="upload-progress-bar"></div>
+                </div>
+                <div id="uploadProgressPercent" class="upload-progress-percent">0%</div>
+                <button id="cancelUploadBtn" class="action-button upload-cancel-button" type="button">Cancel</button>
+              </div>
+            </div>
             <div
               id="pitchScrollbar"
               class="pitch-scrollbar"

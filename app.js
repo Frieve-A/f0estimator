@@ -13,7 +13,7 @@ const HARD_MAX_MIDI = 108;
 const MIN_PITCH_SPAN = 12;
 const VIEW_MODE_GRAPH = "graph";
 const VIEW_MODE_TUNER = "tuner";
-const RENDERER_WORKER_URL = "renderer-worker.js?v=13";
+const RENDERER_WORKER_URL = "renderer-worker.js?v=14";
 const TUNER_DEFAULT_CENTER_MIDI = 69;
 const TUNER_HALF_RANGE_MIDI = 0.5;
 const TUNER_CENT_GRID_STEP = 10;
@@ -53,6 +53,13 @@ const QUEUE_TARGET_LATENCY_MS = 180;
 const QUEUE_RECOVERY_MS = 140;
 const RUNNING_STATUS_CATCHUP_MS = 2500;
 const RUNNING_STATUS_ADAPTING_MS = 2500;
+const UPLOAD_PROGRESS_DECODE_END = 0.14;
+const UPLOAD_PROGRESS_PREPARE_END = 0.22;
+const UPLOAD_PROGRESS_ENGINE_END = 0.28;
+const UPLOAD_PROGRESS_ANALYSIS_END = 0.98;
+const UPLOAD_PROGRESS_COMMIT_END = 1;
+const UPLOAD_ANALYSIS_YIELD_FRAMES = 4;
+const UPLOAD_AUDIO_CHUNK_SAMPLES = 65536;
 const CREPE_TFJS_URL = "https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js";
 const CREPE_MODEL_URL = "https://cdn.jsdelivr.net/gh/ml5js/ml5-data-and-models/models/pitch-detection/crepe/model.json";
 const STORAGE_KEY = "frieve-f0-estimator-settings-v1";
@@ -94,6 +101,8 @@ const els = {
   overlayStartBtn: document.getElementById("overlayStartBtn"),
   pauseBtn: document.getElementById("pauseBtn"),
   clearBtn: document.getElementById("clearBtn"),
+  uploadBtn: document.getElementById("uploadBtn"),
+  uploadInput: document.getElementById("uploadInput"),
   exportBtn: document.getElementById("exportBtn"),
   timeZoomInBtn: document.getElementById("timeZoomInBtn"),
   timeZoomOutBtn: document.getElementById("timeZoomOutBtn"),
@@ -114,6 +123,11 @@ const els = {
   backgroundCanvas: document.getElementById("backgroundCanvas"),
   traceCanvas: document.getElementById("traceCanvas"),
   hoverHint: document.getElementById("hoverHint"),
+  uploadOverlay: document.getElementById("uploadOverlay"),
+  uploadProgressLabel: document.getElementById("uploadProgressLabel"),
+  uploadProgressBar: document.getElementById("uploadProgressBar"),
+  uploadProgressPercent: document.getElementById("uploadProgressPercent"),
+  cancelUploadBtn: document.getElementById("cancelUploadBtn"),
   pitchScrollbar: document.getElementById("pitchScrollbar"),
   pitchScrollbarThumb: document.getElementById("pitchScrollbarThumb"),
   startOverlay: document.getElementById("startOverlay"),
@@ -199,6 +213,14 @@ const state = {
     statusUpdateTimerId: null,
     statusUpdateFrameId: null,
     lastStatusUpdateAt: 0,
+  },
+  upload: {
+    active: false,
+    cancelRequested: false,
+    token: null,
+    snapshot: null,
+    pausedRunningInput: false,
+    progress: 0,
   },
 };
 
@@ -543,6 +565,10 @@ function isTunerMode() {
 }
 
 function setViewMode(mode) {
+  if (isUploadProcessing()) {
+    return;
+  }
+
   const nextMode = mode === VIEW_MODE_TUNER ? VIEW_MODE_TUNER : VIEW_MODE_GRAPH;
   if (state.view.mode === nextMode) {
     return;
@@ -613,6 +639,7 @@ function updateModeControls() {
   }
 
   setAttribute(els.pitchScrollbar, "aria-disabled", String(tunerMode));
+  applyUploadControlLock();
 }
 
 function tunerCenterMidiFromSample(sample) {
@@ -1045,6 +1072,163 @@ function markBackgroundDirty() {
   state.canvas.backgroundDirty = true;
 }
 
+function isUploadProcessing() {
+  return state.upload.active;
+}
+
+function applyUploadControlLock() {
+  const locked = isUploadProcessing();
+  const controls = [
+    els.modeToggleBtn,
+    els.overlayStartBtn,
+    els.pauseBtn,
+    els.clearBtn,
+    els.uploadBtn,
+    els.exportBtn,
+    els.timeZoomInBtn,
+    els.timeZoomOutBtn,
+    els.pitchZoomInBtn,
+    els.pitchZoomOutBtn,
+    els.thresholdInput,
+  ];
+
+  if (locked) {
+    for (const control of controls) {
+      control.disabled = true;
+    }
+    els.uploadInput.disabled = true;
+    els.cancelUploadBtn.hidden = false;
+    els.cancelUploadBtn.disabled = state.upload.cancelRequested;
+    setAttribute(els.pitchScrollbar, "aria-disabled", "true");
+    return;
+  }
+
+  els.uploadBtn.disabled = false;
+  els.uploadInput.disabled = false;
+  els.thresholdInput.disabled = false;
+  els.cancelUploadBtn.hidden = true;
+  els.cancelUploadBtn.disabled = false;
+}
+
+function updateStartOverlayVisibility() {
+  els.startOverlay.hidden = state.pitchSamples.length > 0
+    || (state.micState !== "idle" && state.micState !== "error");
+}
+
+function setUploadProgress(label, progress) {
+  const value = clamp(progress, 0, 1);
+  const percent = Math.round(value * 100);
+  state.upload.progress = value;
+  setText(els.uploadProgressLabel, label);
+  setText(els.uploadProgressPercent, `${percent}%`);
+  els.uploadProgressBar.style.width = `${(value * 100).toFixed(1)}%`;
+
+  const progressTrack = els.uploadProgressBar.parentElement;
+  if (progressTrack) {
+    setAttribute(progressTrack, "aria-valuenow", String(percent));
+  }
+}
+
+function showUploadOverlay() {
+  els.uploadOverlay.hidden = false;
+  if (typeof els.cancelUploadBtn.focus === "function") {
+    els.cancelUploadBtn.focus({ preventScroll: true });
+  }
+}
+
+function hideUploadOverlay() {
+  els.uploadOverlay.hidden = true;
+}
+
+function clonePitchSample(sample) {
+  return {
+    timeSec: sample.timeSec,
+    frequency: sample.frequency,
+    midiFloat: sample.midiFloat,
+    confidence: sample.confidence,
+    voiced: sample.voiced,
+    tunerAverageMidi: sample.tunerAverageMidi,
+  };
+}
+
+function cloneSelectionRange(range) {
+  if (!range) {
+    return null;
+  }
+  return { ...range };
+}
+
+function createAnalysisSnapshot() {
+  const pitchSamples = state.pitchSamples.map(clonePitchSample);
+  return {
+    pitchSamples,
+    currentIndex: state.currentSample ? state.pitchSamples.indexOf(state.currentSample) : -1,
+    hoverIndex: state.view.hoverSample ? state.pitchSamples.indexOf(state.view.hoverSample) : -1,
+    latestTimeSec: state.latestTimeSec,
+    frameStartSample: state.frameStartSample,
+    modelQueue: new Float32Array(state.modelQueue),
+    pendingQueueSkipSamples: state.analysis.pendingQueueSkipSamples,
+    tunerAverage: { ...state.tunerAverage },
+    sustainedDeviation: { ...state.sustainedDeviation },
+    view: {
+      followNow: state.view.followNow,
+      manualRightTime: state.view.manualRightTime,
+      selectionRange: cloneSelectionRange(state.view.selectionRange),
+    },
+    message: {
+      text: els.messageStatus.textContent,
+      isError: els.messageStatus.classList.contains("error"),
+    },
+  };
+}
+
+function restoreAnalysisSnapshot(snapshot) {
+  state.pitchSamples = snapshot.pitchSamples.map(clonePitchSample);
+  state.currentSample = snapshot.currentIndex >= 0
+    ? state.pitchSamples[snapshot.currentIndex]
+    : null;
+  state.latestTimeSec = snapshot.latestTimeSec;
+  state.frameStartSample = snapshot.frameStartSample;
+  state.modelQueue = new Float32Array(snapshot.modelQueue);
+  state.analysis.pendingQueueSkipSamples = snapshot.pendingQueueSkipSamples;
+  Object.assign(state.tunerAverage, snapshot.tunerAverage);
+  Object.assign(state.sustainedDeviation, snapshot.sustainedDeviation);
+  state.view.followNow = snapshot.view.followNow;
+  state.view.manualRightTime = snapshot.view.manualRightTime;
+  state.view.hoverSample = snapshot.hoverIndex >= 0
+    ? state.pitchSamples[snapshot.hoverIndex]
+    : null;
+  state.view.selectionRange = cloneSelectionRange(snapshot.view.selectionRange);
+
+  if (!state.view.hoverSample && !state.view.selectionRange) {
+    hideHint();
+  }
+  updateStartOverlayVisibility();
+  replaceRendererSamples();
+  markBackgroundDirty();
+  updateStatus();
+  draw();
+}
+
+function resetPitchHistoryState() {
+  state.pitchSamples = [];
+  state.currentSample = null;
+  state.latestTimeSec = 0;
+  state.frameStartSample = 0;
+  state.modelQueue = new Float32Array(0);
+  state.analysis.pendingQueueSkipSamples = 0;
+  resetTunerAverageState();
+  resetSustainedDeviationState();
+  clearRendererSamples();
+  state.view.hoverSample = null;
+  state.view.selectionRange = null;
+  state.view.followNow = true;
+  state.view.manualRightTime = state.view.visibleSeconds;
+  els.exportBtn.disabled = true;
+  hideHint();
+  updateStartOverlayVisibility();
+}
+
 function setMicState(nextState) {
   state.micState = nextState;
   if (nextState === "running") {
@@ -1057,7 +1241,8 @@ function setMicState(nextState) {
   els.pauseBtn.title = pauseLabel;
   els.pauseBtn.setAttribute("aria-label", pauseLabel);
   els.exportBtn.disabled = state.pitchSamples.length === 0;
-  els.startOverlay.hidden = nextState !== "idle" && nextState !== "error";
+  updateStartOverlayVisibility();
+  applyUploadControlLock();
   updateStatus();
 }
 
@@ -1186,7 +1371,8 @@ function stopAnimationLoop() {
 async function startMic(options = {}) {
   const resumePaused = options.resumePaused === true;
   if (
-    state.micState === "requesting"
+    isUploadProcessing()
+    || state.micState === "requesting"
     || state.micState === "running"
     || (state.micState === "paused" && !resumePaused)
   ) {
@@ -1542,7 +1728,13 @@ function clampHopSamples(samples) {
   return clamp(Math.round(samples), MIN_HOP_SAMPLES, MAX_HOP_SAMPLES);
 }
 
-function addPitchSample(timeSec, frequency, confidence) {
+function addPitchSample(timeSec, frequency, confidence, options = {}) {
+  const {
+    autoScrollPitch = true,
+    queueRender = true,
+    trimHistory = true,
+    updateUi = true,
+  } = options;
   const midiFloat = frequencyToMidi(frequency);
   const hardRangeVoiced = Number.isFinite(midiFloat) && midiFloat >= HARD_MIN_MIDI && midiFloat <= HARD_MAX_MIDI;
   const voiced = Number.isFinite(frequency)
@@ -1562,19 +1754,28 @@ function addPitchSample(timeSec, frequency, confidence) {
   updateTunerAverageForSample(sample);
   updateSustainedDeviationForSample(sample);
   state.pitchSamples.push(sample);
-  queueRendererSample(sample);
+  if (queueRender) {
+    queueRendererSample(sample);
+  }
   state.latestTimeSec = Math.max(state.latestTimeSec, timeSec);
   state.currentSample = sample;
 
-  const cutoff = state.latestTimeSec - MAX_HISTORY_SECONDS;
-  while (state.pitchSamples.length > 0 && state.pitchSamples[0].timeSec < cutoff) {
-    state.pitchSamples.shift();
+  if (trimHistory) {
+    const cutoff = state.latestTimeSec - MAX_HISTORY_SECONDS;
+    while (state.pitchSamples.length > 0 && state.pitchSamples[0].timeSec < cutoff) {
+      state.pitchSamples.shift();
+    }
   }
 
-  const pitchRangeChanged = autoScrollPitchToSample(sample);
+  const pitchRangeChanged = autoScrollPitch ? autoScrollPitchToSample(sample) : false;
+  if (!updateUi) {
+    return sample;
+  }
+
   if (els.exportBtn.disabled) {
     els.exportBtn.disabled = false;
   }
+  updateStartOverlayVisibility();
   if (state.micState === "running") {
     state.view.followNow = true;
   }
@@ -1582,9 +1783,14 @@ function addPitchSample(timeSec, frequency, confidence) {
     markBackgroundDirty();
   }
   requestStatusUpdate();
+  return sample;
 }
 
 function togglePause() {
+  if (isUploadProcessing()) {
+    return;
+  }
+
   if (!state.audioContext && state.micState !== "paused") {
     return;
   }
@@ -1609,7 +1815,7 @@ function togglePause() {
 }
 
 function toggleTransport() {
-  if (state.micState === "requesting") {
+  if (isUploadProcessing() || state.micState === "requesting") {
     return;
   }
   if (state.micState === "running" || state.micState === "paused") {
@@ -1620,26 +1826,20 @@ function toggleTransport() {
 }
 
 function clearHistory() {
-  state.pitchSamples = [];
-  state.currentSample = null;
-  state.latestTimeSec = 0;
-  state.frameStartSample = 0;
-  state.modelQueue = new Float32Array(0);
-  state.analysis.pendingQueueSkipSamples = 0;
-  resetTunerAverageState();
-  resetSustainedDeviationState();
-  clearRendererSamples();
-  state.view.hoverSample = null;
-  state.view.selectionRange = null;
-  state.view.followNow = true;
-  state.view.manualRightTime = state.view.visibleSeconds;
-  els.exportBtn.disabled = true;
-  hideHint();
+  if (isUploadProcessing()) {
+    return;
+  }
+
+  resetPitchHistoryState();
   updateStatus();
   draw();
 }
 
 function exportCsv() {
+  if (isUploadProcessing()) {
+    return;
+  }
+
   const header = "time_sec,f0_hz,midi_float,note_name,octave,cents_from_nearest,confidence,voiced";
   const rows = state.pitchSamples.map((sample) => {
     const row = csvRowForSample(sample);
@@ -1665,6 +1865,310 @@ function exportCsv() {
   link.click();
   link.remove();
   URL.revokeObjectURL(url);
+}
+
+function handleUploadButtonClick() {
+  if (isUploadProcessing()) {
+    return;
+  }
+
+  els.uploadInput.value = "";
+  els.uploadInput.click();
+}
+
+function handleUploadInputChange(event) {
+  if (isUploadProcessing()) {
+    return;
+  }
+
+  const file = event.target.files && event.target.files[0];
+  if (!file) {
+    return;
+  }
+
+  processUploadedAudio(file);
+}
+
+function cancelUploadProcessing() {
+  if (!isUploadProcessing()) {
+    return;
+  }
+
+  state.upload.cancelRequested = true;
+  if (state.upload.token) {
+    state.upload.token.cancelled = true;
+  }
+  setUploadProgress("Cancelling", state.upload.progress);
+  applyUploadControlLock();
+}
+
+function eventTargetsCancelUpload(event) {
+  return event.target === els.cancelUploadBtn
+    || (
+      typeof els.cancelUploadBtn.contains === "function"
+      && els.cancelUploadBtn.contains(event.target)
+    );
+}
+
+function suppressInteractionDuringUpload(event) {
+  if (!isUploadProcessing() || eventTargetsCancelUpload(event)) {
+    return;
+  }
+
+  event.preventDefault();
+  event.stopPropagation();
+}
+
+async function processUploadedAudio(file) {
+  const snapshot = createAnalysisSnapshot();
+  const token = { cancelled: false };
+  const pausedRunningInput = state.micState === "running";
+
+  state.upload.active = true;
+  state.upload.cancelRequested = false;
+  state.upload.token = token;
+  state.upload.snapshot = snapshot;
+  state.upload.pausedRunningInput = pausedRunningInput;
+  showUploadOverlay();
+  setUploadProgress("Preparing upload", 0);
+  applyUploadControlLock();
+
+  try {
+    if (pausedRunningInput) {
+      pauseRunningInputForUpload();
+    }
+
+    setUploadProgress(`Decoding ${file.name || "audio"}`, 0.02);
+    const audioBuffer = await decodeUploadedAudio(file, token);
+    checkUploadCancelled(token);
+
+    const monoAudio = await mixAudioBufferToMono(audioBuffer, token);
+    checkUploadCancelled(token);
+
+    const modelAudio = await resampleAudioToModelRate(monoAudio, audioBuffer.sampleRate, token);
+    checkUploadCancelled(token);
+
+    setUploadProgress("Preparing estimator", UPLOAD_PROGRESS_PREPARE_END);
+    await setupPitchEngine();
+    checkUploadCancelled(token);
+
+    setUploadProgress("Analyzing audio", UPLOAD_PROGRESS_ENGINE_END);
+    const results = await analyzeUploadedModelAudio(modelAudio, token);
+    checkUploadCancelled(token);
+
+    setUploadProgress("Updating graph", UPLOAD_PROGRESS_ANALYSIS_END);
+    replacePitchHistoryWithUploadResults(results);
+    setUploadProgress("Complete", UPLOAD_PROGRESS_COMMIT_END);
+    setMessage(`Upload complete (${results.length} frames)`);
+  } catch (error) {
+    restoreAnalysisSnapshot(snapshot);
+    if (isUploadAbortError(error)) {
+      setMessage(pausedRunningInput ? "Paused" : snapshot.message.text, snapshot.message.isError);
+    } else {
+      setMessage("Failed to process uploaded audio", true);
+      console.error(error);
+    }
+  } finally {
+    const currentMicState = state.micState;
+    state.upload.active = false;
+    state.upload.cancelRequested = false;
+    state.upload.token = null;
+    state.upload.snapshot = null;
+    state.upload.pausedRunningInput = false;
+    state.upload.progress = 0;
+    hideUploadOverlay();
+    els.uploadInput.value = "";
+    setMicState(currentMicState);
+    updateModeControls();
+  }
+}
+
+function pauseRunningInputForUpload() {
+  if (state.micState !== "running") {
+    return;
+  }
+
+  stopAnimationLoop();
+  invalidateAnalysisQueue();
+  if (state.audioContext && state.audioContext.state !== "closed") {
+    state.audioContext.suspend().catch(() => {});
+  }
+  setMicState("paused");
+  setMessage("Paused");
+}
+
+async function decodeUploadedAudio(file, token) {
+  checkUploadCancelled(token);
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextClass) {
+    throw new Error("Audio decoding is not available in this browser");
+  }
+
+  const arrayBuffer = await file.arrayBuffer();
+  checkUploadCancelled(token);
+
+  const canReuseContext = state.audioContext && state.audioContext.state !== "closed";
+  const decodeContext = canReuseContext ? state.audioContext : new AudioContextClass();
+  const closeWhenDone = !canReuseContext;
+
+  try {
+    const decoded = await decodeContext.decodeAudioData(arrayBuffer);
+    setUploadProgress("Preparing audio", UPLOAD_PROGRESS_DECODE_END);
+    return decoded;
+  } finally {
+    if (closeWhenDone && decodeContext.state !== "closed") {
+      decodeContext.close().catch(() => {});
+    }
+  }
+}
+
+async function mixAudioBufferToMono(audioBuffer, token) {
+  const sampleRate = Math.max(1, audioBuffer.sampleRate || MODEL_SAMPLE_RATE);
+  const maxSamples = Math.min(audioBuffer.length, Math.floor(sampleRate * MAX_HISTORY_SECONDS));
+  const channelCount = Math.max(1, audioBuffer.numberOfChannels || 1);
+  const channels = [];
+  for (let channel = 0; channel < channelCount; channel += 1) {
+    channels.push(audioBuffer.getChannelData(channel));
+  }
+
+  const output = new Float32Array(maxSamples);
+  for (let start = 0; start < maxSamples; start += UPLOAD_AUDIO_CHUNK_SAMPLES) {
+    checkUploadCancelled(token);
+    const end = Math.min(maxSamples, start + UPLOAD_AUDIO_CHUNK_SAMPLES);
+    for (let i = start; i < end; i += 1) {
+      let sum = 0;
+      for (let channel = 0; channel < channels.length; channel += 1) {
+        sum += channels[channel][i] || 0;
+      }
+      output[i] = sum / channels.length;
+    }
+
+    const ratio = maxSamples === 0 ? 1 : end / maxSamples;
+    const progress = UPLOAD_PROGRESS_DECODE_END
+      + (UPLOAD_PROGRESS_PREPARE_END - UPLOAD_PROGRESS_DECODE_END) * 0.45 * ratio;
+    setUploadProgress("Preparing audio", progress);
+    await yieldToMainThread();
+  }
+
+  return output;
+}
+
+async function resampleAudioToModelRate(input, fromRate, token) {
+  if (input.length === 0) {
+    return input;
+  }
+  if (Math.abs(fromRate - MODEL_SAMPLE_RATE) < 1) {
+    setUploadProgress("Preparing audio", UPLOAD_PROGRESS_PREPARE_END);
+    return input;
+  }
+
+  const outputLength = Math.max(1, Math.floor(((input.length - 1) * MODEL_SAMPLE_RATE) / fromRate) + 1);
+  const output = new Float32Array(outputLength);
+  const step = fromRate / MODEL_SAMPLE_RATE;
+  const progressStart = UPLOAD_PROGRESS_DECODE_END
+    + (UPLOAD_PROGRESS_PREPARE_END - UPLOAD_PROGRESS_DECODE_END) * 0.45;
+
+  for (let start = 0; start < outputLength; start += UPLOAD_AUDIO_CHUNK_SAMPLES) {
+    checkUploadCancelled(token);
+    const end = Math.min(outputLength, start + UPLOAD_AUDIO_CHUNK_SAMPLES);
+    for (let i = start; i < end; i += 1) {
+      const position = i * step;
+      const index = Math.floor(position);
+      const nextIndex = Math.min(input.length - 1, index + 1);
+      const fraction = position - index;
+      output[i] = input[index] * (1 - fraction) + input[nextIndex] * fraction;
+    }
+
+    const ratio = end / outputLength;
+    const progress = progressStart + (UPLOAD_PROGRESS_PREPARE_END - progressStart) * ratio;
+    setUploadProgress("Preparing audio", progress);
+    await yieldToMainThread();
+  }
+
+  return output;
+}
+
+async function analyzeUploadedModelAudio(modelAudio, token) {
+  const hopSamples = MIN_HOP_SAMPLES;
+  const totalFrames = modelAudio.length >= FRAME_SIZE
+    ? Math.floor((modelAudio.length - FRAME_SIZE) / hopSamples) + 1
+    : 0;
+  const results = [];
+
+  if (totalFrames === 0) {
+    setUploadProgress("Analyzing audio", UPLOAD_PROGRESS_ANALYSIS_END);
+    return results;
+  }
+
+  for (let frameIndex = 0; frameIndex < totalFrames; frameIndex += 1) {
+    checkUploadCancelled(token);
+    const start = frameIndex * hopSamples;
+    const frame = new Float32Array(modelAudio.subarray(start, start + FRAME_SIZE));
+    const result = await state.engine.estimate(frame);
+    checkUploadCancelled(token);
+
+    results.push({
+      timeSec: (start + FRAME_SIZE / 2) / MODEL_SAMPLE_RATE,
+      frequency: result.frequency,
+      confidence: result.confidence,
+    });
+
+    if (frameIndex % UPLOAD_ANALYSIS_YIELD_FRAMES === 0 || frameIndex === totalFrames - 1) {
+      const ratio = (frameIndex + 1) / totalFrames;
+      const progress = UPLOAD_PROGRESS_ENGINE_END
+        + (UPLOAD_PROGRESS_ANALYSIS_END - UPLOAD_PROGRESS_ENGINE_END) * ratio;
+      setUploadProgress("Analyzing audio", progress);
+      await yieldToMainThread();
+    }
+  }
+
+  return results;
+}
+
+function replacePitchHistoryWithUploadResults(results) {
+  resetPitchHistoryState();
+
+  for (const result of results) {
+    addPitchSample(result.timeSec, result.frequency, result.confidence, {
+      autoScrollPitch: false,
+      queueRender: false,
+      trimHistory: false,
+      updateUi: false,
+    });
+  }
+
+  state.view.followNow = false;
+  state.view.manualRightTime = state.view.visibleSeconds;
+  state.view.hoverSample = null;
+  state.view.selectionRange = null;
+  els.exportBtn.disabled = state.pitchSamples.length === 0;
+  updateStartOverlayVisibility();
+  replaceRendererSamples();
+  markBackgroundDirty();
+  updateStatus();
+  draw();
+}
+
+function checkUploadCancelled(token) {
+  if (token && token.cancelled) {
+    throw createUploadAbortError();
+  }
+}
+
+function createUploadAbortError() {
+  const error = new Error("Upload cancelled");
+  error.name = "AbortError";
+  return error;
+}
+
+function isUploadAbortError(error) {
+  return error && error.name === "AbortError";
+}
+
+function yieldToMainThread() {
+  return new Promise((resolve) => {
+    setTimeout(resolve, 0);
+  });
 }
 
 function csvRowForSample(sample) {
@@ -2681,7 +3185,7 @@ function positiveModulo(value, modulus) {
 }
 
 function autoScrollPitchToSample(sample) {
-  if (!sample.voiced || !Number.isFinite(sample.midiFloat)) {
+  if (!sample || !sample.voiced || !Number.isFinite(sample.midiFloat)) {
     return false;
   }
 
@@ -2728,6 +3232,10 @@ function clamp(value, min, max) {
 }
 
 function zoomTime(factor, anchorX = state.canvas.width - 1) {
+  if (isUploadProcessing()) {
+    return;
+  }
+
   const rightTime = getRightTime();
   const anchorTime = xToTime(anchorX, rightTime);
   const oldVisible = state.view.visibleSeconds;
@@ -2746,7 +3254,7 @@ function zoomTime(factor, anchorX = state.canvas.width - 1) {
 }
 
 function zoomPitch(factor, anchorY = state.canvas.height / 2) {
-  if (isTunerMode()) {
+  if (isUploadProcessing() || isTunerMode()) {
     return;
   }
 
@@ -2778,7 +3286,7 @@ function zoomPitch(factor, anchorY = state.canvas.height / 2) {
 }
 
 function panPitch(deltaMidi) {
-  if (isTunerMode()) {
+  if (isUploadProcessing() || isTunerMode()) {
     return;
   }
 
@@ -2794,7 +3302,7 @@ function panPitch(deltaMidi) {
 }
 
 function setPitchRangeFromScrollbarTop(top) {
-  if (isTunerMode()) {
+  if (isUploadProcessing() || isTunerMode()) {
     return;
   }
 
@@ -2817,6 +3325,10 @@ function setPitchRangeFromScrollbarTop(top) {
 }
 
 function panTime(deltaSeconds) {
+  if (isUploadProcessing()) {
+    return;
+  }
+
   if (state.view.followNow) {
     state.view.followNow = false;
     state.view.manualRightTime = getRightTime();
@@ -2833,6 +3345,10 @@ function panTime(deltaSeconds) {
 
 function handleWheel(event) {
   event.preventDefault();
+  if (isUploadProcessing()) {
+    return;
+  }
+
   const rect = els.canvasWrap.getBoundingClientRect();
   const x = event.clientX - rect.left;
   const y = event.clientY - rect.top;
@@ -2867,7 +3383,7 @@ function handleWheel(event) {
 function handlePitchScrollbarPointerDown(event) {
   event.preventDefault();
   event.stopPropagation();
-  if (isTunerMode()) {
+  if (isUploadProcessing() || isTunerMode()) {
     return;
   }
 
@@ -2879,11 +3395,21 @@ function handlePitchScrollbarPointerDown(event) {
   const offsetY = clickedThumb ? pointerTop - thumbTop : thumbRect.height / 2;
 
   state.view.pitchScrollbarDrag = { pointerId: event.pointerId, offsetY };
-  els.pitchScrollbar.setPointerCapture(event.pointerId);
+  try {
+    els.pitchScrollbar.setPointerCapture(event.pointerId);
+  } catch (error) {
+    // Synthetic pointer events may not have an active pointer capture target.
+  }
   setPitchRangeFromScrollbarTop(pointerTop - offsetY);
 }
 
 function handlePitchScrollbarPointerMove(event) {
+  if (isUploadProcessing()) {
+    event.preventDefault();
+    event.stopPropagation();
+    return;
+  }
+
   const drag = state.view.pitchScrollbarDrag;
   if (!drag || drag.pointerId !== event.pointerId) {
     return;
@@ -2896,6 +3422,12 @@ function handlePitchScrollbarPointerMove(event) {
 }
 
 function handlePitchScrollbarPointerUp(event) {
+  if (isUploadProcessing()) {
+    event.stopPropagation();
+    state.view.pitchScrollbarDrag = null;
+    return;
+  }
+
   const drag = state.view.pitchScrollbarDrag;
   if (drag && drag.pointerId === event.pointerId) {
     event.stopPropagation();
@@ -3049,6 +3581,11 @@ function releasePointerCaptureIfNeeded(event) {
 }
 
 function handlePointerDown(event) {
+  if (isUploadProcessing()) {
+    event.preventDefault();
+    return;
+  }
+
   if (!isPrimaryMouseOrNonMousePointer(event)) {
     return;
   }
@@ -3062,7 +3599,11 @@ function handlePointerDown(event) {
   hideHint();
 
   if (typeof els.canvasWrap.setPointerCapture === "function") {
-    els.canvasWrap.setPointerCapture(event.pointerId);
+    try {
+      els.canvasWrap.setPointerCapture(event.pointerId);
+    } catch (error) {
+      // Synthetic pointer events may not have an active pointer capture target.
+    }
   }
   state.view.pointerDrag = {
     pointerId: event.pointerId,
@@ -3093,6 +3634,11 @@ function handlePointerDown(event) {
 }
 
 function handlePointerMove(event) {
+  if (isUploadProcessing()) {
+    event.preventDefault();
+    return;
+  }
+
   if (state.view.pointerDrag && state.view.pointerDrag.pointerId === event.pointerId) {
     const drag = state.view.pointerDrag;
     const point = canvasPointFromPointerEvent(event);
@@ -3132,6 +3678,11 @@ function handlePointerMove(event) {
 }
 
 function handlePointerUp(event) {
+  if (isUploadProcessing()) {
+    event.preventDefault();
+    return;
+  }
+
   if (state.view.pointerDrag && state.view.pointerDrag.pointerId === event.pointerId) {
     const drag = state.view.pointerDrag;
     clearRangeLongPressTimer(drag);
@@ -3164,6 +3715,10 @@ function handlePointerUp(event) {
 }
 
 function updateHover(event) {
+  if (isUploadProcessing()) {
+    return;
+  }
+
   const rect = els.canvasWrap.getBoundingClientRect();
   const x = event.clientX - rect.left;
   const y = event.clientY - rect.top;
@@ -3386,12 +3941,19 @@ function bindEvents() {
   els.overlayStartBtn.addEventListener("click", startMic);
   els.pauseBtn.addEventListener("click", togglePause);
   els.clearBtn.addEventListener("click", clearHistory);
+  els.uploadBtn.addEventListener("click", handleUploadButtonClick);
+  els.uploadInput.addEventListener("change", handleUploadInputChange);
+  els.cancelUploadBtn.addEventListener("click", cancelUploadProcessing);
   els.exportBtn.addEventListener("click", exportCsv);
   els.timeZoomInBtn.addEventListener("click", () => zoomTime(0.8));
   els.timeZoomOutBtn.addEventListener("click", () => zoomTime(1.25));
   els.pitchZoomInBtn.addEventListener("click", () => zoomPitch(0.8));
   els.pitchZoomOutBtn.addEventListener("click", () => zoomPitch(1.25));
   els.thresholdInput.addEventListener("input", () => {
+    if (isUploadProcessing()) {
+      return;
+    }
+
     state.analysis.confidenceThreshold = Number(els.thresholdInput.value);
     els.thresholdValue.value = state.analysis.confidenceThreshold.toFixed(2);
     for (const sample of state.pitchSamples) {
@@ -3433,6 +3995,14 @@ function bindEvents() {
   });
 
   window.addEventListener("keydown", (event) => {
+    if (isUploadProcessing()) {
+      if (eventTargetsCancelUpload(event)) {
+        return;
+      }
+      event.preventDefault();
+      return;
+    }
+
     const targetTag = event.target && event.target.tagName;
     if (targetTag && ["INPUT", "TEXTAREA", "SELECT"].includes(targetTag)) {
       return;
@@ -3451,6 +4021,8 @@ function bindEvents() {
       zoomTime(1.25);
     }
   });
+  document.addEventListener("click", suppressInteractionDuringUpload, true);
+  document.addEventListener("pointerdown", suppressInteractionDuringUpload, true);
   document.addEventListener("visibilitychange", handleVisibilityChange);
   window.addEventListener("pagehide", handlePageHide);
 }
