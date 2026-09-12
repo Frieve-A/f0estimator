@@ -8,9 +8,9 @@
 
 ## Overview
 
-Frieve F0 Estimator helps you see how the pitch of a voice or single-note instrument changes over time. You can use live microphone input or upload an audio file from your device.
+Frieve F0 Estimator visualizes pitch over time from a live microphone or an audio file. It supports focused analysis of voices and single-note instruments, as well as simultaneous-pitch analysis for polyphonic sources.
 
-Use `Graph` mode when you want to review pitch movement over time. Use `Tuner` mode when you want a focused view of the current note and how sharp or flat it is.
+Use `Graph` mode to review the pitch contour of a monophonic source over time, `Tuner` mode to focus on the current note and its tuning, and `Multi F0` mode to inspect simultaneous pitches without combining them into a single contour.
 
 ## Features
 
@@ -35,11 +35,21 @@ Use `Graph` mode when you want to review pitch movement over time. Use `Tuner` m
 - Follow the detected note as you sing or play.
 - Review the smoothed pitch trace around the current note.
 
+### Multi F0 Mode
+
+- Analyze simultaneous pitches with EffeTune DSP's Note Spectrogram.
+- View each detection independently, without connecting detections into pitch contours.
+- Read confidence through color and opacity, and per-pitch volume through point size and brightness.
+- Use the `Conf` slider to filter detections without running the analysis again.
+- Switch between monophonic and polyphonic views without mixing their histories.
+
+Multi F0 uses a 20-cent pitch grid. It presents estimated pitch observations rather than tracked notes or chord names, so results depend on the source material and the estimator's characteristics.
+
 ### Readouts and Export
 
-- See the current detected note in the graph area.
-- See a stability readout for notes held for at least 1 second.
-- Export pitch observations as CSV.
+- See the current detected note in the graph area in Graph and Tuner modes.
+- See a stability readout for notes held for at least 1 second in the monophonic modes.
+- Export the observations for the active mode as CSV.
 
 ## Running
 
@@ -57,26 +67,29 @@ Then open `http://localhost:4173/`.
 
 ## Verification
 
-The repository includes lightweight checks for browser UI behavior, Tuner mode logic, range selection, and upload state handling.
+The repository includes checks for browser UI behavior, Tuner mode logic, Multi F0 analysis, range selection, upload state handling, and renderer compatibility.
 
 ```sh
 node tools/verify-tuner-mode.mjs
+node tools/verify-multi-f0.mjs http://localhost:4173
 node tools/verify-browser.mjs http://localhost:4173
 ```
 
-`tools/verify-tuner-mode.mjs` checks the shared lower-left current note label, sustained-note MAD visibility/update/reset behavior, range-selection stats hint behavior, and mocked upload success/Cancel restoration. `tools/verify-browser.mjs` requires Playwright to be available in the local Node environment. Set `VERIFY_MIC=1` to include a fake-microphone startup check.
+`tools/verify-tuner-mode.mjs` checks the monophonic and Tuner behavior. `tools/verify-multi-f0.mjs` runs the actual EffeTune WASM against a synthetic chord and checks file analysis, cancellation, microphone routing, engine isolation, CSV output, both renderer paths, offline loading, and mobile layout. The browser checks require Playwright and Chrome to be available locally. Set `VERIFY_MIC=1` when running `tools/verify-browser.mjs` to include its fake-microphone startup check.
 
 ## Developer Notes
 
 ### Inference
 
-In the browser, the app loads the CREPE model with TensorFlow.js. Following the PitchCREPE specification, inference input is 16 kHz and output values `time_sec`, `f0_hz`, and `confidence` are converted to MIDI values.
+Graph and Tuner modes use the monophonic F0 pipeline. The browser loads the CREPE model with TensorFlow.js and falls back to YIN if the model is unavailable. Following the PitchCREPE specification, CREPE input is resampled to 16 kHz and its `time_sec`, `f0_hz`, and `confidence` output is converted to MIDI values.
 
 The graph display can scroll up to C8. The current CREPE model output itself is effectively limited near the B6/C7 area, while the YIN fallback searches up to the C8 display ceiling. Realtime inference begins at a 10 ms hop and can adapt the hop up to 250 ms under load. Uploaded audio is decoded by the browser, analyzed offline through the same pitch pipeline, and uses the same 10-minute retained-history limit as the realtime graph.
 
+Multi F0 mode uses EffeTune DSP 0.9.0 Note Spectrogram at the input sample rate. Live input runs through EffeTune's AudioWorklet, while uploaded files are analyzed in a dedicated Web Worker. This mode does not initialize or invoke CREPE or YIN. The EffeTune JavaScript runtime, baseline and SIMD WASM files, and license notices are included under `vendor/effetune`, allowing the Multi F0 engine to load without an external model download. Live Multi F0 analysis requires AudioWorklet support.
+
 ### CSV
 
-`Export CSV` outputs the following columns.
+In Graph and Tuner modes, `Export CSV` outputs the following columns:
 
 ```csv
 time_sec,f0_hz,midi_float,note_name,octave,cents_from_nearest,confidence,voiced
@@ -84,13 +97,19 @@ time_sec,f0_hz,midi_float,note_name,octave,cents_from_nearest,confidence,voiced
 
 `voiced` is determined by the current confidence threshold and the C1-C8 hard range.
 
+In Multi F0 mode, each detected pitch is written as a separate row. Simultaneous detections share the same `time_sec`, and the output adds the per-pitch `volume_db` column:
+
+```csv
+time_sec,f0_hz,midi_float,note_name,octave,cents_from_nearest,confidence,voiced,volume_db
+```
+
 ### Rendering and Offline Shell
 
 Rendering uses an OffscreenCanvas Web Worker when supported, with a main-thread canvas fallback. The app includes a web manifest and service worker for installable/offline app-shell behavior.
 
 ### License Notes
 
-Before using CREPE/PitchCREPE-family models or Essentia-family libraries for commercial distribution, SaaS, or paid services, check the license of each model and library individually.
+Third-party components remain under their respective licenses. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for their licenses, sources, usage, and redistribution notices.
 
 ---
 
@@ -104,9 +123,9 @@ Before using CREPE/PitchCREPE-family models or Essentia-family libraries for com
 
 ### 概要
 
-Frieve F0 Estimatorは、声や単音楽器の音の高さが時間とともにどう動くかを確認するためのWebアプリです。マイク入力を使うことも、手元の音声ファイルをアップロードすることもできます。
+Frieve F0 Estimatorは、マイク入力または音声ファイルから音高の時間変化を可視化するWebアプリです。声や単音楽器を詳しく確認する単音解析に加え、複音源に含まれる複数の音高を同時に解析できます。
 
-`Graph` モードでは音程の動きを時間軸で確認できます。`Tuner` モードでは、今の音名と、基準の音からどれくらい高いか低いかを集中的に確認できます。
+`Graph` モードでは単音源の音高軌跡を時間軸で確認できます。`Tuner` モードでは現在の音名と基準音からのずれを集中的に確認できます。`Multi F0` モードでは、同時に検出された複数の音高を単一の軌跡にまとめず表示します。
 
 ### 機能
 
@@ -131,11 +150,21 @@ Frieve F0 Estimatorは、声や単音楽器の音の高さが時間とともに�
 - 歌ったり演奏したりしている音に表示が追従します。
 - 現在音の周辺で、平滑化された音程の動きを確認できます。
 
+#### Multi F0モード
+
+- EffeTune DSPのNote Spectrogramを使用して、複数の音高を同時に解析できます。
+- 検出結果を音高軌跡として線で結ばず、個々の観測点として表示します。
+- Confidenceを色と透明度、音高ごとの音量を点の大きさと明るさで確認できます。
+- `Conf` スライダーで、再解析せずに表示する検出結果を絞り込めます。
+- 単音モードと複音モードの履歴を混在させずに切り替えられます。
+
+Multi F0の音高グリッドは20 cent単位です。音符の追跡やコード名の判定は行わず、推定された音高の観測結果を表示するため、結果は音源と推定器の特性に依存します。
+
 #### 表示と出力
 
-- グラフ上に現在の検出音名を表示します。
-- 1秒以上伸ばした音では、音程の安定度を示す表示が出ます。
-- 観測データをCSVとしてエクスポートできます。
+- Graph／Tunerモードでは、グラフ上に現在の検出音名を表示します。
+- 単音モードで1秒以上伸ばした音では、音程の安定度を表示します。
+- 選択中のモードの観測データをCSVとしてエクスポートできます。
 
 ### 実行
 
@@ -153,26 +182,29 @@ python -m http.server 4173
 
 ### 検証
 
-ブラウザUIの基本動作、Tunerモードロジック、範囲選択、Upload状態処理を確認する軽量スクリプトがあります。
+ブラウザUIの基本動作、Tunerモード、Multi F0解析、範囲選択、Upload状態処理、描画方式の互換性を確認する検証スクリプトがあります。
 
 ```sh
 node tools/verify-tuner-mode.mjs
+node tools/verify-multi-f0.mjs http://localhost:4173
 node tools/verify-browser.mjs http://localhost:4173
 ```
 
-`tools/verify-tuner-mode.mjs` では、共通の左下の現在音名表示、継続音MADの表示・更新・リセット動作、範囲選択統計hint、Upload成功/Cancel復元のモック検証も確認します。`tools/verify-browser.mjs` の実行には、ローカルのNode環境でPlaywrightが使える必要があります。`VERIFY_MIC=1` を指定するとfake microphoneでの起動確認も含めます。
+`tools/verify-tuner-mode.mjs` は単音解析とTunerモードの動作を確認します。`tools/verify-multi-f0.mjs` は実際のEffeTune WASMに合成和音を入力し、ファイル解析、Cancel時の復元、マイク経路、単音エンジンとの分離、CSV、2種類の描画経路、オフライン読み込み、モバイル表示を確認します。ブラウザ検証にはPlaywrightとChromeが必要です。`tools/verify-browser.mjs` で `VERIFY_MIC=1` を指定すると、疑似マイクによる起動確認も行います。
 
 ### 開発者向け情報
 
 #### 推論
 
-ブラウザではTensorFlow.jsでCREPEモデルを読み込みます。PitchCREPEの仕様に合わせ、推論入力は16kHz、出力は `time_sec`、`f0_hz`、`confidence` をもとにMIDI値へ変換します。
+Graph／Tunerモードは単音F0推定パイプラインを使用します。ブラウザではTensorFlow.jsでCREPEモデルを読み込み、モデルを利用できない場合はYINへフォールバックします。PitchCREPEの仕様に合わせて入力を16 kHzへリサンプリングし、`time_sec`、`f0_hz`、`confidence` の出力をMIDI値へ変換します。
 
 グラフ表示はC8までスクロールできます。現在のCREPEモデル出力自体は実質的にB6/C7付近までで、YIN fallbackは表示上限に合わせてC8まで探索します。リアルタイム推論のhopは10msから開始し、処理負荷に応じて最大250msまで自動調整します。アップロード音声はブラウザでデコードし、同じピッチ推定パイプラインでオフライン解析します。保持履歴はリアルタイム表示と同じく最大10分です。
 
+Multi F0モードは、入力サンプルレートのままEffeTune DSP 0.9.0のNote Spectrogramを使用します。リアルタイム入力はEffeTuneのAudioWorklet、アップロードファイルは専用Web Workerで解析します。このモードではCREPEとYINを初期化・実行しません。EffeTuneのJavaScriptランタイム、baseline／SIMD版WASM、ライセンス情報は `vendor/effetune` に同梱しているため、Multi F0の起動時に外部モデルをダウンロードする必要はありません。リアルタイムのMulti F0解析にはAudioWorklet対応ブラウザが必要です。
+
 #### CSV
 
-`Export CSV` は以下のカラムを出力します。
+Graph／Tunerモードの `Export CSV` は以下のカラムを出力します。
 
 ```csv
 time_sec,f0_hz,midi_float,note_name,octave,cents_from_nearest,confidence,voiced
@@ -180,10 +212,16 @@ time_sec,f0_hz,midi_float,note_name,octave,cents_from_nearest,confidence,voiced
 
 `voiced` は現在のconfidence thresholdとC1-C8のhard rangeで判定します。
 
+Multi F0モードでは、検出された音高ごとに1行を出力します。同時に検出された音高は同じ `time_sec` を持ち、音高ごとの音量を表す `volume_db` 列が追加されます。
+
+```csv
+time_sec,f0_hz,midi_float,note_name,octave,cents_from_nearest,confidence,voiced,volume_db
+```
+
 #### 描画とオフラインapp shell
 
 描画は対応ブラウザではOffscreenCanvas Web Workerを使い、非対応環境ではメインスレッドCanvasへfallbackします。web manifestとservice workerを含み、インストール可能なPWA風のapp shellキャッシュに対応しています。
 
 #### ライセンス注意
 
-CREPE/PitchCREPE系モデルやEssentia系ライブラリを商用配布、SaaS、有償提供で使う場合は、利用するモデルとライブラリのライセンスを個別に確認してください。
+サードパーティ製コンポーネントには、それぞれのライセンスが適用されます。ライセンス、入手元、利用形態、再配布時の告知については [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) を参照してください。

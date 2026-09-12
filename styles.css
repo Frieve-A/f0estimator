@@ -983,3 +983,39 @@ canvas {
     padding-bottom: 5px;
   }
 }
+/* Polyphonic view uses the same restrained teal palette as the piano roll. */
+.mode-selector { display: inline-flex; padding: 3px; gap: 2px; border: 1px solid #ffffff20; border-radius: 10px; background: #080d14; }
+.mode-selector button { min-height: 28px; padding: 0 10px; background: transparent; box-shadow: none; border-color: transparent; color: #8e9baa; font-size: 12px; }
+.mode-selector button[aria-pressed="true"] {
+  color: #b6fff0;
+  border-color: #398d80;
+  background: linear-gradient(145deg, #193b38, #13242d);
+  box-shadow: inset 0 1px 0 #ffffff12;
+}
+.multi-legend {
+  position: absolute;
+  top: 18px;
+  left: 72px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  padding: 9px 13px;
+  border: 1px solid #81c8c01f;
+  border-radius: 8px;
+  background: #0b151de8;
+  color: #a1b6c5;
+  font-size: 11px;
+  pointer-events: none;
+}
+.multi-legend[hidden] { display: none; }
+.multi-legend > span { display: inline-flex; align-items: center; gap: 7px; }
+.multi-eyebrow { color: #a8e9dc; font-size: 10px; letter-spacing: 0.13em; font-weight: 700; }
+.confidence-ramp { width: 29px; height: 5px; border-radius: 3px; background: linear-gradient(90deg, #274151, #79ffe0); }
+.volume-dots { color: #89e6d2; font-style: normal; letter-spacing: 3px; }
+@media (max-width: 600px) {
+  .topbar { flex-wrap: wrap; }
+  .toolbar { flex: 0 0 100%; flex-wrap: wrap; overflow: visible; padding: 0; }
+  .mode-selector { flex-shrink: 0; }
+  .multi-legend { left: 64px; top: 10px; gap: 9px; padding: 7px 9px; }
+}

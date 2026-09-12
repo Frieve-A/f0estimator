@@ -36,7 +36,8 @@
       gtag("js", new Date());
       gtag("config", "G-P7PK35NHTP");
     </script>
-    <script src="app.js?v=14" defer></script>
+    <script src="multi-f0-visual.js" defer></script>
+    <script src="app.js?v=15" defer></script>
   </head>
   <body>
     <div class="app-shell">
@@ -53,10 +54,12 @@
           </div>
         </div>
         <div class="toolbar" aria-label="Controls">
-          <button id="modeToggleBtn" class="action-button mode-button" type="button" title="Switch to Tuner" aria-label="Mode: Graph">
-            <span class="mode-button-label">Mode</span>
-            <span id="modeValue">Graph</span>
-          </button>
+          <div class="mode-selector" role="group" aria-label="Analysis mode">
+            <button id="modeToggleBtn" type="button" aria-pressed="true" title="Single F0 history">Graph</button>
+            <button id="tunerModeBtn" type="button" aria-pressed="false" title="Single-note tuner">Tuner</button>
+            <button id="multiModeBtn" type="button" aria-pressed="false" title="Analyze simultaneous notes with EffeTune">Multi F0</button>
+          </div>
+          <span id="modeValue" hidden>Graph</span>
           <button id="pauseBtn" class="action-button icon-action" type="button" disabled title="Pause" aria-label="Pause">⏸</button>
           <button id="clearBtn" class="action-button" type="button">Clear</button>
           <button id="uploadBtn" class="action-button icon-action" type="button" title="Upload audio" aria-label="Upload audio">
@@ -102,6 +105,11 @@
           <div id="canvasWrap" class="canvas-wrap">
             <canvas id="backgroundCanvas"></canvas>
             <canvas id="traceCanvas"></canvas>
+            <div id="multiLegend" class="multi-legend" hidden>
+              <span class="multi-eyebrow">POLYPHONIC</span>
+              <span><i class="confidence-ramp"></i>Confidence</span>
+              <span><i class="volume-dots">• ●</i>Volume</span>
+            </div>
             <div id="hoverHint" class="hover-hint" hidden></div>
             <div id="uploadOverlay" class="upload-overlay" hidden aria-live="polite">
               <div class="upload-progress-panel" role="status" aria-label="Upload processing">

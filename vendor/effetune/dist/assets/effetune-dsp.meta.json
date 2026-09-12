@@ -1,0 +1,1048 @@
+{
+  "abiVersion": 1,
+  "sourceDigest": "sha256:90549b24002bff49d9b1083419fa9c82294c48239de45281e3f3186b93461584",
+  "emsdkVersion": "6.0.2",
+  "g726PerformanceInput": {
+    "contract": "g726-production-performance-input-sha256-v2",
+    "hashAlgorithm": "SHA-256 over the contract and ordered UTF-8 components as id\\0content\\0; CRLF and CR normalize to LF",
+    "digest": "sha256:0a3e7c36d1e8bf8b6b28ea2716b25b23e322575b214ef720236488aa627f8514",
+    "inputs": [
+      {
+        "id": "dsp/core/abi.cpp",
+        "kind": "file",
+        "sha256": "sha256:ae52245f49287e6bf3345ba0860e65c7eb9d49fe61fabb0a3fb3459bb9eb6676"
+      },
+      {
+        "id": "dsp/core/allocation_guard.cpp",
+        "kind": "file",
+        "sha256": "sha256:69dd284b57f2704580778028a33d05f683fa8d5674de22b4aa094c2254475049"
+      },
+      {
+        "id": "dsp/core/allocation_guard.h",
+        "kind": "file",
+        "sha256": "sha256:3b515279d561968d70e2e85f9e430bd0b81c5b513cdb8b6233d3253cb5a9cf44"
+      },
+      {
+        "id": "dsp/core/arena.cpp",
+        "kind": "file",
+        "sha256": "sha256:9b2795ac6f44ab7cc7708d6f831f180b4df73ebff438e16745519cf00be4f4be"
+      },
+      {
+        "id": "dsp/core/arena.h",
+        "kind": "file",
+        "sha256": "sha256:a474f8318433d0cd264d8397abaeafcdb03bfcedce057343771f88668d5134c1"
+      },
+      {
+        "id": "dsp/core/engine.cpp",
+        "kind": "file",
+        "sha256": "sha256:04c3257634399acfadf9ee258be827ee26fce0a86d8189397f0d4bae245b1343"
+      },
+      {
+        "id": "dsp/core/engine.h",
+        "kind": "file",
+        "sha256": "sha256:7a6dab8dcc980bc0535c2571942e0674fe96eba7c3053b6c97460ea2c8807c97"
+      },
+      {
+        "id": "dsp/core/registry.cpp",
+        "kind": "file",
+        "sha256": "sha256:1ca815678d0ecc13ee7dfd35f8c0af6b2ea1d4ff1e7100177349057b7ebbdcab"
+      },
+      {
+        "id": "dsp/core/registry.h",
+        "kind": "file",
+        "sha256": "sha256:7f83d8a03050edea60aa89a6efab1cd66a139812908aaa91bf12b8ff7f72239e"
+      },
+      {
+        "id": "dsp/core/telemetry.cpp",
+        "kind": "file",
+        "sha256": "sha256:a78cfe83117c9ea3714f0fe83e320e377165331c56627283f2193c78012514da"
+      },
+      {
+        "id": "dsp/EMSDK_VERSION",
+        "kind": "file",
+        "sha256": "sha256:8adcc17e039842d2f4d92ca25f72a8963ede072c885ef5f762c0682b87c6d872"
+      },
+      {
+        "id": "dsp/exports.txt",
+        "kind": "file",
+        "sha256": "sha256:d9fafe26c1f1d23eaa4f38fa61073f992f34a0649e85eac39df9bd1dc8215342"
+      },
+      {
+        "id": "dsp/generated/cpp/G726ADPCMSimulatorPluginParams.h",
+        "kind": "file",
+        "sha256": "sha256:56b4bd6c17d1c62a6dd341e45143926a6cac2563a8342f27d459fc9ccab325ab"
+      },
+      {
+        "id": "dsp/include/effetune/abi.h",
+        "kind": "file",
+        "sha256": "sha256:18dcdc3fdd2af9de4b7acb27dacb3441b01a441e9447af1908efb69437b3909a"
+      },
+      {
+        "id": "dsp/include/effetune/dsp/halfband.h",
+        "kind": "file",
+        "sha256": "sha256:6707a8f7d82d951161256e6545571976b8a538f7517e6bb5887b21c2806c9411"
+      },
+      {
+        "id": "dsp/include/effetune/dsp/rational_resampler.h",
+        "kind": "file",
+        "sha256": "sha256:5e74d6a4f7092736e6653f6f4424c569c63f7b80a72b9befe1338103d9f423e4"
+      },
+      {
+        "id": "dsp/include/effetune/dsp/xorshift_rng.h",
+        "kind": "file",
+        "sha256": "sha256:b7f7c8100b501737041b0db649cb3c058a077b4d58f7fdaf5d86afc853faf67e"
+      },
+      {
+        "id": "dsp/include/effetune/kernel.h",
+        "kind": "file",
+        "sha256": "sha256:077893c235793dd2a250404672bbee43f18e91fd0e24753b96fddc846dc853ff"
+      },
+      {
+        "id": "dsp/include/effetune/telemetry.h",
+        "kind": "file",
+        "sha256": "sha256:4b0ba04d8d3c3e104bfb34d5b8d54254a51d45766790fdab8059fea2adb7c218"
+      },
+      {
+        "id": "dsp/plugins/lofi/g726_adpcm_simulator/kernel.cpp",
+        "kind": "file",
+        "sha256": "sha256:2dc4bcdded1afb5a9127d4225e833182038cda30be2af9c9280c28f4949fdabd"
+      },
+      {
+        "id": "dsp/plugins/lofi/g726_adpcm_simulator/kernel.h",
+        "kind": "file",
+        "sha256": "sha256:22651b16d025a151af078c6592e7cf4b2d908044617d39f4767b8673cde01e3d"
+      },
+      {
+        "id": "dsp/plugins/lofi/g726_adpcm_simulator/params.json",
+        "kind": "file",
+        "sha256": "sha256:128c5eb52ac4eecd786065ecc778005a88fef91fb8fb7ea49e74028415f2b5dc"
+      },
+      {
+        "id": "dsp/registry.inc#G726ADPCMSimulatorPlugin-entry",
+        "kind": "derived",
+        "sha256": "sha256:2666e2704579948c97d868484a026316e77d6cc5234c4966fd62f8e2397884f5"
+      },
+      {
+        "id": "dsp/wasm/no_entry.cpp",
+        "kind": "file",
+        "sha256": "sha256:0d2961904f2cd8bd43c50a4f861c7ad7ea8865a7c4cd4ec05e197c1a4182b3a3"
+      },
+      {
+        "id": "js/audio/dsp-engine-binding.js",
+        "kind": "file",
+        "sha256": "sha256:9170a7449b2ef298d0f4cfc7ce1c04b8ddffcf4c42b2ed2923df459b5c5f4cca"
+      },
+      {
+        "id": "production-build#g726-resolved-authority",
+        "kind": "derived",
+        "sha256": "sha256:2ca9dd1e894b53f50680461b52d5b6d87a426d798f0fca78ec1703e5bc64e292"
+      },
+      {
+        "id": "production-build#g726-source-authority",
+        "kind": "derived",
+        "sha256": "sha256:c3ba72f659ad95930a1405d0269cc0cf92ef8ccf7b0ac87b84def93a1f281b1c"
+      },
+      {
+        "id": "tools/dsp-parity/cases.mjs",
+        "kind": "file",
+        "sha256": "sha256:6648f94de566a4c2a4560a222a3957892d890e92ef79dd660a1e0b91ee2bbf02"
+      },
+      {
+        "id": "tools/dsp-parity/g726-cpu-gate.mjs",
+        "kind": "file",
+        "sha256": "sha256:80fbcd07b5ff860e2ee3d8f24be2459bff7025f47af8568cbb285b577133addd"
+      },
+      {
+        "id": "tools/dsp-parity/g726-performance-inputs.mjs",
+        "kind": "file",
+        "sha256": "sha256:4f5ac71c0c61327c921640fb0b82102d4db93aaa77040e9fb10222ed7e8430aa"
+      },
+      {
+        "id": "tools/dsp-parity/runners.mjs",
+        "kind": "file",
+        "sha256": "sha256:cd67baecc50e260dddedb992f50de963caecf9ec7c6fc76bbf415b3fd4b478ec"
+      },
+      {
+        "id": "tools/dsp-parity/stimuli.mjs",
+        "kind": "file",
+        "sha256": "sha256:76bbda8364561341df8df263cc2b69f3eedb6b2614f4f77a48ed3c75ebe816a3"
+      }
+    ],
+    "registryEntry": "EFFETUNE_PLUGIN(G726ADPCMSimulatorPlugin,lofi/g726_adpcm_simulator)",
+    "buildAuthority": {
+      "source": {
+        "cmakeTargetDeclarations": [
+          "set(CMAKE_CXX_STANDARD 20)",
+          "set(CMAKE_CXX_STANDARD_REQUIRED ON)",
+          "set(CMAKE_CXX_EXTENSIONS OFF)",
+          "target_include_directories( pffft PUBLIC vendor/pffft/include/pffft PRIVATE vendor/pffft/src)",
+          "target_compile_definitions( pffft PUBLIC PFFFT_STATIC_DEFINE=1 PRIVATE $<$<BOOL:${ET_SIMD}>:PFFFT_ENABLE_NEON=1> $<$<NOT:$<BOOL:${ET_SIMD}>>:PFFFT_SIMD_DISABLE=1>)",
+          "target_compile_options(pffft PRIVATE -msimd128)",
+          "set_target_properties(pffft PROPERTIES POSITION_INDEPENDENT_CODE ON)",
+          "target_link_libraries(pffft PUBLIC m)",
+          "target_include_directories( effetune_dsp_core PUBLIC include bindings/generated PRIVATE core generated/cpp)",
+          "target_link_libraries(effetune_dsp_core PUBLIC pffft effetune_note_models)",
+          "target_compile_definitions( effetune_dsp_core PRIVATE $<$<BOOL:${ET_SIMD}>:ET_SIMD=1> $<$<BOOL:${ET_DEBUG_STATE}>:ET_DEBUG_STATE=1> $<$<CONFIG:Debug>:ET_DEBUG_BUILD=1> $<$<CONFIG:Debug>:ET_ALLOCATION_GUARD=1> $<$<AND:$<CONFIG:Debug>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:ET_WRAP_MALLOC=1> $<$<BOOL:${BUILD_TESTING}>:ET_ENABLE_TEST_KERNEL=1>)",
+          "target_link_options( effetune_dsp_core INTERFACE $<$<AND:$<CONFIG:Debug>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:-Wl,--wrap=malloc>)",
+          "target_compile_options(effetune_dsp_core PRIVATE /W4 /WX /GR-)",
+          "target_compile_definitions( effetune_dsp_core PRIVATE ET_ENABLE_LIFECYCLE_EXCEPTION_BOUNDARY=1)",
+          "target_compile_options( effetune_dsp_core PRIVATE -Wall -Wextra -Wpedantic -Werror -fwasm-exceptions -fno-rtti)",
+          "target_compile_options( effetune_dsp_core PRIVATE -Wall -Wextra -Wpedantic -Werror -fno-exceptions -fno-rtti)",
+          "target_link_libraries(effetune-dsp PRIVATE effetune_dsp_core)",
+          "set_target_properties(effetune-dsp PROPERTIES OUTPUT_NAME \"effetune-dsp\" SUFFIX \".wasm\")",
+          "target_compile_options( effetune_dsp_core PRIVATE $<$<CONFIG:Release>:-O3> $<$<CONFIG:Release>:-flto> $<$<BOOL:${ET_SIMD}>:-msimd128>)",
+          "target_link_options( effetune-dsp PRIVATE --no-entry -sSTANDALONE_WASM=1 -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=8388608 -sMAXIMUM_MEMORY=268435456 -sEXPORTED_FUNCTIONS=@${ET_EXPORTED_FUNCTIONS_FILE} -fwasm-exceptions $<$<CONFIG:Release>:-O3> $<$<CONFIG:Release>:-flto> $<$<BOOL:${ET_SIMD}>:-msimd128>)"
+        ],
+        "builderInvocation": "function configureAndBuildWasm({ emcmake, name, simd, debugState = false }) { const buildDirectory = path.join(buildRoot, name); resetBuildDirectory(buildDirectory); const configureArguments = productionWasmConfigureArguments({ dspRoot, buildDirectory, simd, debugState }); run(emcmake, configureArguments); run('cmake', ['--build', buildDirectory, '--parallel']); const artifact = path.join(buildDirectory, 'effetune-dsp.wasm'); if (!fs.existsSync(artifact)) { fail(`WASM build did not produce ${artifact}`); } return { artifact, buildDirectory, configureArguments }; }",
+        "productionConfigureArguments": {
+          "baseline": [
+            "cmake",
+            "-S",
+            "<repo>/dsp",
+            "-B",
+            "<build>",
+            "-G",
+            "Ninja",
+            "-DCMAKE_BUILD_TYPE=Release",
+            "-DET_SIMD=OFF",
+            "-DET_DEBUG_STATE=OFF",
+            "-DBUILD_TESTING=OFF"
+          ],
+          "simd": [
+            "cmake",
+            "-S",
+            "<repo>/dsp",
+            "-B",
+            "<build>",
+            "-G",
+            "Ninja",
+            "-DCMAKE_BUILD_TYPE=Release",
+            "-DET_SIMD=ON",
+            "-DET_DEBUG_STATE=OFF",
+            "-DBUILD_TESTING=OFF"
+          ]
+        },
+        "digest": "sha256:080044043c3ad5e8b4d6c7811ad1c0622550b6c6493d6f257caa98d422ac5c98"
+      },
+      "resolved": {
+        "source": "configured CMake Ninja compile/link edges",
+        "variants": {
+          "baseline": {
+            "variant": "baseline",
+            "configureArguments": [
+              "cmake",
+              "-S",
+              "<repo>/dsp",
+              "-B",
+              "<build>",
+              "-G",
+              "Ninja",
+              "-DCMAKE_BUILD_TYPE=Release",
+              "-DET_SIMD=OFF",
+              "-DET_DEBUG_STATE=OFF",
+              "-DBUILD_TESTING=OFF"
+            ],
+            "emsdkVersion": "6.0.2",
+            "compiler": {
+              "id": "Clang",
+              "version": "23.0.0",
+              "platform": "emscripten",
+              "frontendVariant": "GNU",
+              "executable": "em++"
+            },
+            "compileCommands": [
+              {
+                "source": "dsp/core/abi.cpp",
+                "definitions": "-DET_ENABLE_LIFECYCLE_EXCEPTION_BOUNDARY=1 -DPFFFT_STATIC_DEFINE=1",
+                "flags": "-O3 -DNDEBUG -std=c++20 -Wall -Wextra -Wpedantic -Werror -fwasm-exceptions -fno-rtti -O3 -flto",
+                "includes": "-I<repo>/dsp/include -I<repo>/dsp/bindings/generated -I<repo>/dsp/core -I<repo>/dsp/generated/cpp -I<repo>/dsp/vendor/pffft/include/pffft -I<build>/note-models -I<repo>/dsp/plugins/analyzer/note_spectrogram"
+              },
+              {
+                "source": "dsp/core/allocation_guard.cpp",
+                "definitions": "-DET_ENABLE_LIFECYCLE_EXCEPTION_BOUNDARY=1 -DPFFFT_STATIC_DEFINE=1",
+                "flags": "-O3 -DNDEBUG -std=c++20 -Wall -Wextra -Wpedantic -Werror -fwasm-exceptions -fno-rtti -O3 -flto",
+                "includes": "-I<repo>/dsp/include -I<repo>/dsp/bindings/generated -I<repo>/dsp/core -I<repo>/dsp/generated/cpp -I<repo>/dsp/vendor/pffft/include/pffft -I<build>/note-models -I<repo>/dsp/plugins/analyzer/note_spectrogram"
+              },
+              {
+                "source": "dsp/core/arena.cpp",
+                "definitions": "-DET_ENABLE_LIFECYCLE_EXCEPTION_BOUNDARY=1 -DPFFFT_STATIC_DEFINE=1",
+                "flags": "-O3 -DNDEBUG -std=c++20 -Wall -Wextra -Wpedantic -Werror -fwasm-exceptions -fno-rtti -O3 -flto",
+                "includes": "-I<repo>/dsp/include -I<repo>/dsp/bindings/generated -I<repo>/dsp/core -I<repo>/dsp/generated/cpp -I<repo>/dsp/vendor/pffft/include/pffft -I<build>/note-models -I<repo>/dsp/plugins/analyzer/note_spectrogram"
+              },
+              {
+                "source": "dsp/core/engine.cpp",
+                "definitions": "-DET_ENABLE_LIFECYCLE_EXCEPTION_BOUNDARY=1 -DPFFFT_STATIC_DEFINE=1",
+                "flags": "-O3 -DNDEBUG -std=c++20 -Wall -Wextra -Wpedantic -Werror -fwasm-exceptions -fno-rtti -O3 -flto",
+                "includes": "-I<repo>/dsp/include -I<repo>/dsp/bindings/generated -I<repo>/dsp/core -I<repo>/dsp/generated/cpp -I<repo>/dsp/vendor/pffft/include/pffft -I<build>/note-models -I<repo>/dsp/plugins/analyzer/note_spectrogram"
+              },
+              {
+                "source": "dsp/core/registry.cpp",
+                "definitions": "-DET_ENABLE_LIFECYCLE_EXCEPTION_BOUNDARY=1 -DPFFFT_STATIC_DEFINE=1",
+                "flags": "-O3 -DNDEBUG -std=c++20 -Wall -Wextra -Wpedantic -Werror -fwasm-exceptions -fno-rtti -O3 -flto",
+                "includes": "-I<repo>/dsp/include -I<repo>/dsp/bindings/generated -I<repo>/dsp/core -I<repo>/dsp/generated/cpp -I<repo>/dsp/vendor/pffft/include/pffft -I<build>/note-models -I<repo>/dsp/plugins/analyzer/note_spectrogram"
+              },
+              {
+                "source": "dsp/core/telemetry.cpp",
+                "definitions": "-DET_ENABLE_LIFECYCLE_EXCEPTION_BOUNDARY=1 -DPFFFT_STATIC_DEFINE=1",
+                "flags": "-O3 -DNDEBUG -std=c++20 -Wall -Wextra -Wpedantic -Werror -fwasm-exceptions -fno-rtti -O3 -flto",
+                "includes": "-I<repo>/dsp/include -I<repo>/dsp/bindings/generated -I<repo>/dsp/core -I<repo>/dsp/generated/cpp -I<repo>/dsp/vendor/pffft/include/pffft -I<build>/note-models -I<repo>/dsp/plugins/analyzer/note_spectrogram"
+              },
+              {
+                "source": "dsp/plugins/lofi/g726_adpcm_simulator/kernel.cpp",
+                "definitions": "-DET_ENABLE_LIFECYCLE_EXCEPTION_BOUNDARY=1 -DPFFFT_STATIC_DEFINE=1",
+                "flags": "-O3 -DNDEBUG -std=c++20 -Wall -Wextra -Wpedantic -Werror -fwasm-exceptions -fno-rtti -O3 -flto",
+                "includes": "-I<repo>/dsp/include -I<repo>/dsp/bindings/generated -I<repo>/dsp/core -I<repo>/dsp/generated/cpp -I<repo>/dsp/vendor/pffft/include/pffft -I<build>/note-models -I<repo>/dsp/plugins/analyzer/note_spectrogram"
+              },
+              {
+                "source": "dsp/wasm/no_entry.cpp",
+                "definitions": "-DPFFFT_STATIC_DEFINE=1",
+                "flags": "-O3 -DNDEBUG -std=c++20",
+                "includes": "-I<repo>/dsp/include -I<repo>/dsp/bindings/generated -I<repo>/dsp/vendor/pffft/include/pffft -I<build>/note-models -I<repo>/dsp/plugins/analyzer/note_spectrogram"
+              }
+            ],
+            "linkCommand": {
+              "flags": "-O3 -DNDEBUG",
+              "options": "--no-entry -sSTANDALONE_WASM=1 -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=8388608 -sMAXIMUM_MEMORY=268435456 -sEXPORTED_FUNCTIONS=@<repo>/dsp/exports.txt -fwasm-exceptions -O3 -flto",
+              "libraries": "libeffetune_dsp_core.a libpffft.a -lm libeffetune_note_models.a"
+            }
+          },
+          "simd": {
+            "variant": "simd",
+            "configureArguments": [
+              "cmake",
+              "-S",
+              "<repo>/dsp",
+              "-B",
+              "<build>",
+              "-G",
+              "Ninja",
+              "-DCMAKE_BUILD_TYPE=Release",
+              "-DET_SIMD=ON",
+              "-DET_DEBUG_STATE=OFF",
+              "-DBUILD_TESTING=OFF"
+            ],
+            "emsdkVersion": "6.0.2",
+            "compiler": {
+              "id": "Clang",
+              "version": "23.0.0",
+              "platform": "emscripten",
+              "frontendVariant": "GNU",
+              "executable": "em++"
+            },
+            "compileCommands": [
+              {
+                "source": "dsp/core/abi.cpp",
+                "definitions": "-DET_ENABLE_LIFECYCLE_EXCEPTION_BOUNDARY=1 -DET_SIMD=1 -DPFFFT_STATIC_DEFINE=1",
+                "flags": "-O3 -DNDEBUG -std=c++20 -Wall -Wextra -Wpedantic -Werror -fwasm-exceptions -fno-rtti -O3 -flto -msimd128",
+                "includes": "-I<repo>/dsp/include -I<repo>/dsp/bindings/generated -I<repo>/dsp/core -I<repo>/dsp/generated/cpp -I<repo>/dsp/vendor/pffft/include/pffft -I<build>/note-models -I<repo>/dsp/plugins/analyzer/note_spectrogram"
+              },
+              {
+                "source": "dsp/core/allocation_guard.cpp",
+                "definitions": "-DET_ENABLE_LIFECYCLE_EXCEPTION_BOUNDARY=1 -DET_SIMD=1 -DPFFFT_STATIC_DEFINE=1",
+                "flags": "-O3 -DNDEBUG -std=c++20 -Wall -Wextra -Wpedantic -Werror -fwasm-exceptions -fno-rtti -O3 -flto -msimd128",
+                "includes": "-I<repo>/dsp/include -I<repo>/dsp/bindings/generated -I<repo>/dsp/core -I<repo>/dsp/generated/cpp -I<repo>/dsp/vendor/pffft/include/pffft -I<build>/note-models -I<repo>/dsp/plugins/analyzer/note_spectrogram"
+              },
+              {
+                "source": "dsp/core/arena.cpp",
+                "definitions": "-DET_ENABLE_LIFECYCLE_EXCEPTION_BOUNDARY=1 -DET_SIMD=1 -DPFFFT_STATIC_DEFINE=1",
+                "flags": "-O3 -DNDEBUG -std=c++20 -Wall -Wextra -Wpedantic -Werror -fwasm-exceptions -fno-rtti -O3 -flto -msimd128",
+                "includes": "-I<repo>/dsp/include -I<repo>/dsp/bindings/generated -I<repo>/dsp/core -I<repo>/dsp/generated/cpp -I<repo>/dsp/vendor/pffft/include/pffft -I<build>/note-models -I<repo>/dsp/plugins/analyzer/note_spectrogram"
+              },
+              {
+                "source": "dsp/core/engine.cpp",
+                "definitions": "-DET_ENABLE_LIFECYCLE_EXCEPTION_BOUNDARY=1 -DET_SIMD=1 -DPFFFT_STATIC_DEFINE=1",
+                "flags": "-O3 -DNDEBUG -std=c++20 -Wall -Wextra -Wpedantic -Werror -fwasm-exceptions -fno-rtti -O3 -flto -msimd128",
+                "includes": "-I<repo>/dsp/include -I<repo>/dsp/bindings/generated -I<repo>/dsp/core -I<repo>/dsp/generated/cpp -I<repo>/dsp/vendor/pffft/include/pffft -I<build>/note-models -I<repo>/dsp/plugins/analyzer/note_spectrogram"
+              },
+              {
+                "source": "dsp/core/registry.cpp",
+                "definitions": "-DET_ENABLE_LIFECYCLE_EXCEPTION_BOUNDARY=1 -DET_SIMD=1 -DPFFFT_STATIC_DEFINE=1",
+                "flags": "-O3 -DNDEBUG -std=c++20 -Wall -Wextra -Wpedantic -Werror -fwasm-exceptions -fno-rtti -O3 -flto -msimd128",
+                "includes": "-I<repo>/dsp/include -I<repo>/dsp/bindings/generated -I<repo>/dsp/core -I<repo>/dsp/generated/cpp -I<repo>/dsp/vendor/pffft/include/pffft -I<build>/note-models -I<repo>/dsp/plugins/analyzer/note_spectrogram"
+              },
+              {
+                "source": "dsp/core/telemetry.cpp",
+                "definitions": "-DET_ENABLE_LIFECYCLE_EXCEPTION_BOUNDARY=1 -DET_SIMD=1 -DPFFFT_STATIC_DEFINE=1",
+                "flags": "-O3 -DNDEBUG -std=c++20 -Wall -Wextra -Wpedantic -Werror -fwasm-exceptions -fno-rtti -O3 -flto -msimd128",
+                "includes": "-I<repo>/dsp/include -I<repo>/dsp/bindings/generated -I<repo>/dsp/core -I<repo>/dsp/generated/cpp -I<repo>/dsp/vendor/pffft/include/pffft -I<build>/note-models -I<repo>/dsp/plugins/analyzer/note_spectrogram"
+              },
+              {
+                "source": "dsp/plugins/lofi/g726_adpcm_simulator/kernel.cpp",
+                "definitions": "-DET_ENABLE_LIFECYCLE_EXCEPTION_BOUNDARY=1 -DET_SIMD=1 -DPFFFT_STATIC_DEFINE=1",
+                "flags": "-O3 -DNDEBUG -std=c++20 -Wall -Wextra -Wpedantic -Werror -fwasm-exceptions -fno-rtti -O3 -flto -msimd128",
+                "includes": "-I<repo>/dsp/include -I<repo>/dsp/bindings/generated -I<repo>/dsp/core -I<repo>/dsp/generated/cpp -I<repo>/dsp/vendor/pffft/include/pffft -I<build>/note-models -I<repo>/dsp/plugins/analyzer/note_spectrogram"
+              },
+              {
+                "source": "dsp/wasm/no_entry.cpp",
+                "definitions": "-DPFFFT_STATIC_DEFINE=1",
+                "flags": "-O3 -DNDEBUG -std=c++20",
+                "includes": "-I<repo>/dsp/include -I<repo>/dsp/bindings/generated -I<repo>/dsp/vendor/pffft/include/pffft -I<build>/note-models -I<repo>/dsp/plugins/analyzer/note_spectrogram"
+              }
+            ],
+            "linkCommand": {
+              "flags": "-O3 -DNDEBUG",
+              "options": "--no-entry -sSTANDALONE_WASM=1 -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=8388608 -sMAXIMUM_MEMORY=268435456 -sEXPORTED_FUNCTIONS=@<repo>/dsp/exports.txt -fwasm-exceptions -O3 -flto -msimd128",
+              "libraries": "libeffetune_dsp_core.a libpffft.a -lm libeffetune_note_models.a"
+            }
+          }
+        },
+        "digest": "sha256:a8ff530879318f93c094cfcdff6f8d6b264f15f8f294819187c73157ff1b5586"
+      }
+    }
+  },
+  "kernels": [
+    {
+      "name": "LevelMeterPlugin",
+      "hash": 2166136261,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "NoteSpectrogramPlugin",
+      "hash": 211541838,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "OscilloscopePlugin",
+      "hash": 2229411282,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "SpectrogramPlugin",
+      "hash": 3382561824,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "SpectrumAnalyzerPlugin",
+      "hash": 3382561824,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "StereoMeterPlugin",
+      "hash": 2967351826,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "ChannelDividerPlugin",
+      "hash": 3926343008,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "DCOffsetPlugin",
+      "hash": 1104945464,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "FIRCrossoverPlugin",
+      "hash": 577225552,
+      "byteCapacity": 0,
+      "assets": [
+        {
+          "slot": 0,
+          "format": "ET_ASSET_F32_MULTICH",
+          "capacity": "32 MiB convolution cap",
+          "byteCapacity": 33554432
+        }
+      ]
+    },
+    {
+      "name": "MatrixPlugin",
+      "hash": 117968709,
+      "byteCapacity": 3076,
+      "assets": []
+    },
+    {
+      "name": "MultiChannelPanelPlugin",
+      "hash": 2638026937,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "MutePlugin",
+      "hash": 2166136261,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "PolarityInversionPlugin",
+      "hash": 2166136261,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "StereoBalancePlugin",
+      "hash": 289332571,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "VolumePlugin",
+      "hash": 1719233191,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "DelayPlugin",
+      "hash": 1607012936,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "TimeAlignmentPlugin",
+      "hash": 669252438,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "AutoLevelerPlugin",
+      "hash": 3769758541,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "BrickwallLimiterPlugin",
+      "hash": 3039928906,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "CompressorPlugin",
+      "hash": 763850658,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "ExpanderPlugin",
+      "hash": 763850658,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "GatePlugin",
+      "hash": 763850658,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "MultibandCompressorPlugin",
+      "hash": 3844787426,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "MultibandExpanderPlugin",
+      "hash": 3844787426,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "MultibandTransientPlugin",
+      "hash": 1428242716,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "PowerAmpSagPlugin",
+      "hash": 745762387,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "TransientShaperPlugin",
+      "hash": 3795078379,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "BandPassFilterPlugin",
+      "hash": 2360494665,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "CombFilterPlugin",
+      "hash": 2689435779,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "EarphoneCableSimPlugin",
+      "hash": 1106244643,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "FifteenBandGEQPlugin",
+      "hash": 1817151884,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "FifteenBandPEQPlugin",
+      "hash": 1637338438,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "FiveBandDynamicEQ",
+      "hash": 2955184071,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "FiveBandFIRPEQPlugin",
+      "hash": 2941825417,
+      "byteCapacity": 0,
+      "assets": [
+        {
+          "slot": 0,
+          "format": "ET_ASSET_F32_MULTICH",
+          "capacity": "32 MiB convolution cap",
+          "byteCapacity": 33554432
+        }
+      ]
+    },
+    {
+      "name": "FiveBandPEQPlugin",
+      "hash": 2285236921,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "GroupDelayEqPlugin",
+      "hash": 2941825417,
+      "byteCapacity": 0,
+      "assets": [
+        {
+          "slot": 0,
+          "format": "ET_ASSET_F32_MULTICH",
+          "capacity": "32 MiB convolution cap",
+          "byteCapacity": 33554432
+        }
+      ]
+    },
+    {
+      "name": "GroupDelayPEQPlugin",
+      "hash": 2941825417,
+      "byteCapacity": 0,
+      "assets": [
+        {
+          "slot": 0,
+          "format": "ET_ASSET_F32_MULTICH",
+          "capacity": "32 MiB convolution cap",
+          "byteCapacity": 33554432
+        }
+      ]
+    },
+    {
+      "name": "HiPassFilterPlugin",
+      "hash": 299011831,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "LoPassFilterPlugin",
+      "hash": 299011831,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "LoudnessEqualizerPlugin",
+      "hash": 2860520897,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "NarrowRangePlugin",
+      "hash": 925285799,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "RoomEqPlugin",
+      "hash": 3893667250,
+      "byteCapacity": 0,
+      "assets": [
+        {
+          "slot": 0,
+          "format": "ET_ASSET_F32_MULTICH",
+          "capacity": "32 MiB convolution cap",
+          "byteCapacity": 33554432
+        }
+      ]
+    },
+    {
+      "name": "TiltEQPlugin",
+      "hash": 3110132925,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "ToneControlPlugin",
+      "hash": 4085396528,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "AMRadioSimulatorPlugin",
+      "hash": 1895450983,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "BitCrusherPlugin",
+      "hash": 3414646542,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "BluetoothSBCSimulatorPlugin",
+      "hash": 2698474763,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "CassetteArtifactsPlugin",
+      "hash": 4133384581,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "DigitalErrorEmulatorPlugin",
+      "hash": 929157540,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "DSD64IMDSimulatorPlugin",
+      "hash": 1223862878,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "FMRadioSimulatorPlugin",
+      "hash": 538242584,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "G726ADPCMSimulatorPlugin",
+      "hash": 3034355853,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "GSMFullRateSimulatorPlugin",
+      "hash": 3114431516,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "HumGeneratorPlugin",
+      "hash": 2503317040,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "MDSimulatorPlugin",
+      "hash": 2124600068,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "MP3CodecSimulatorPlugin",
+      "hash": 3523139611,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "NoiseBlenderPlugin",
+      "hash": 394198189,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "SimpleJitterPlugin",
+      "hash": 3196737583,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "SWRadioSimulatorPlugin",
+      "hash": 4166365127,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "TapeArtifactsPlugin",
+      "hash": 3186469333,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "VinylArtifactsPlugin",
+      "hash": 1145282217,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "VinylSimulatorPlugin",
+      "hash": 336931452,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "AutoFilterPlugin",
+      "hash": 1612236675,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "AutoPanPlugin",
+      "hash": 1469569767,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "ChorusPlugin",
+      "hash": 2730690922,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "DopplerDistortionPlugin",
+      "hash": 10372816,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "FrequencyShifterPlugin",
+      "hash": 1854760556,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "PhaserPlugin",
+      "hash": 2823426285,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "PitchShifterPlugin",
+      "hash": 1998192054,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "PitchShifterHQPlugin",
+      "hash": 3982397611,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "RotarySpeakerPlugin",
+      "hash": 1430720979,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "TremoloPlugin",
+      "hash": 1836520376,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "WowFlutterPlugin",
+      "hash": 1836520376,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "OscillatorPlugin",
+      "hash": 2237210280,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "HornResonatorPlugin",
+      "hash": 3233763204,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "HornResonatorPlusPlugin",
+      "hash": 3233763204,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "ModalResonatorPlugin",
+      "hash": 1547233380,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "ClickRemoverPlugin",
+      "hash": 3247969793,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "ClipRestorerPlugin",
+      "hash": 2130397206,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "HumRemoverPlugin",
+      "hash": 901971837,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "NoiseReductionPlugin",
+      "hash": 2163822210,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "DattorroPlateReverbPlugin",
+      "hash": 582778991,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "FDNReverbPlugin",
+      "hash": 1755319973,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "IRReverbPlugin",
+      "hash": 2529061658,
+      "byteCapacity": 0,
+      "assets": [
+        {
+          "slot": 0,
+          "format": "ET_ASSET_F32_MULTICH",
+          "capacity": "32 MiB convolution cap",
+          "byteCapacity": 33554432
+        }
+      ]
+    },
+    {
+      "name": "RSReverbPlugin",
+      "hash": 3284023116,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "BandwidthExtenderPlugin",
+      "hash": 3030838001,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "DynamicSaturationPlugin",
+      "hash": 3365051379,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "ExciterPlugin",
+      "hash": 4235094650,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "HardClippingPlugin",
+      "hash": 837158957,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "HarmonicDistortionPlugin",
+      "hash": 83146208,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "MultibandSaturationPlugin",
+      "hash": 698810406,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "SaturationPlugin",
+      "hash": 1115003603,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "SubSynthPlugin",
+      "hash": 116561234,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "TubeSimulatorPlugin",
+      "hash": 127429451,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "CrossfeedFilterPlugin",
+      "hash": 715048833,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "CrosstalkCancellationPlugin",
+      "hash": 1033639474,
+      "byteCapacity": 0,
+      "assets": [
+        {
+          "slot": 0,
+          "format": "ET_ASSET_F32_MULTICH",
+          "capacity": "32 MiB convolution cap",
+          "byteCapacity": 33554432
+        }
+      ]
+    },
+    {
+      "name": "MSMatrixPlugin",
+      "hash": 607668476,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "MultibandBalancePlugin",
+      "hash": 3715792583,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "PhaseSelectEqPlugin",
+      "hash": 1371985786,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
+      "name": "StereoBlendPlugin",
+      "hash": 648556109,
+      "byteCapacity": 0,
+      "assets": []
+    }
+  ],
+  "sizes": {
+    "baseline": 7000109,
+    "simd": 7126702
+  }
+}

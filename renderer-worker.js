@@ -1,4 +1,5 @@
 "use strict";
+importScripts("multi-f0-visual.js");
 
 const MODEL_SAMPLE_RATE = 16000;
 const MAX_HISTORY_SECONDS = 10 * 60;
@@ -144,9 +145,9 @@ function appendSamples(samples) {
   }
 
   const cutoff = latest.timeSec - MAX_HISTORY_SECONDS;
-  while (state.pitchSamples.length > 0 && state.pitchSamples[0].timeSec < cutoff) {
-    state.pitchSamples.shift();
-  }
+  let expired = 0;
+  while (expired < state.pitchSamples.length && state.pitchSamples[expired].timeSec < cutoff) expired++;
+  if (expired) state.pitchSamples.splice(0, expired);
 }
 
 function markBackgroundDirty() {
@@ -159,6 +160,7 @@ function draw(renderState, backgroundDirty) {
   }
 
   state.renderState = renderState;
+  trimSamplesToLatestTime(renderState.latestTimeSec);
   state.canvas.width = Math.max(1, renderState.canvas.width || state.canvas.width);
   state.canvas.height = Math.max(1, renderState.canvas.height || state.canvas.height);
   state.canvas.dpr = Math.max(1, renderState.canvas.dpr || state.canvas.dpr);
@@ -171,6 +173,17 @@ function draw(renderState, backgroundDirty) {
   }
 
   drawTrace();
+}
+
+function trimSamplesToLatestTime(latestTimeSec) {
+  if (!Number.isFinite(latestTimeSec)) {
+    return;
+  }
+
+  const cutoff = latestTimeSec - MAX_HISTORY_SECONDS;
+  let expired = 0;
+  while (expired < state.pitchSamples.length && state.pitchSamples[expired].timeSec < cutoff) expired++;
+  if (expired) state.pitchSamples.splice(0, expired);
 }
 
 function getBackgroundKey() {
@@ -410,7 +423,7 @@ function drawTrace() {
   ctx.clip();
 
   const tunerMode = isTunerMode();
-  if (!tunerMode) {
+  if (!tunerMode && state.renderState.view.mode !== "multi") {
     drawDetectedNoteRoll(ctx, leftTime, rightTime, pitchRange, bounds);
 
     let segmentOpen = false;
@@ -466,6 +479,10 @@ function drawTrace() {
     const y = midiToY(sample.midiFloat);
     ctx.beginPath();
     ctx.arc(x, y, 2.2, 0, Math.PI * 2);
+    if (state.renderState.view.mode === "multi") {
+      drawMultiPoint(ctx, x, y, sample);
+      continue;
+    }
     ctx.fillStyle = sample.confidence >= HIGH_CONFIDENCE_THRESHOLD ? UI_THEME.traceHot : UI_THEME.traceWarm;
     ctx.fill();
   }
@@ -840,6 +857,8 @@ function sampleIsVisible(sample, pitchRange, leftTime, rightTime) {
 }
 
 function chooseTimeGridStep(seconds) {
+  const minimumStep = seconds * 56 / Math.max(1, state.canvas.width - PITCH_AXIS_WIDTH);
+  if (state.renderState.view.mode === "multi") return [0.25, 0.5, 1, 2, 5, 10, 20].find(step => step >= minimumStep) || 20;
   if (seconds <= 4) {
     return 0.25;
   }

@@ -13,7 +13,9 @@ const HARD_MAX_MIDI = 108;
 const MIN_PITCH_SPAN = 12;
 const VIEW_MODE_GRAPH = "graph";
 const VIEW_MODE_TUNER = "tuner";
-const RENDERER_WORKER_URL = "renderer-worker.js?v=14";
+const VIEW_MODE_MULTI = "multi";
+const modeHistories = {};
+const RENDERER_WORKER_URL = "renderer-worker.js?v=15";
 const TUNER_DEFAULT_CENTER_MIDI = 69;
 const TUNER_HALF_RANGE_MIDI = 0.5;
 const TUNER_CENT_GRID_STEP = 10;
@@ -488,7 +490,7 @@ function loadSettings() {
   }
 
   const width = window.innerWidth;
-  state.view.mode = stored.mode === VIEW_MODE_TUNER
+  state.view.mode = stored.mode === VIEW_MODE_MULTI ? VIEW_MODE_MULTI : stored.mode === VIEW_MODE_TUNER
     ? VIEW_MODE_TUNER
     : VIEW_MODE_GRAPH;
   state.view.visibleSeconds = Number.isFinite(stored.visibleSeconds)
@@ -564,17 +566,45 @@ function isTunerMode() {
   return state.view.mode === VIEW_MODE_TUNER;
 }
 
+function isMultiMode() {
+  return state.view.mode === VIEW_MODE_MULTI;
+}
+
 function setViewMode(mode) {
-  if (isUploadProcessing()) {
+  if (isUploadProcessing() || state.micState === "requesting") {
     return;
   }
 
-  const nextMode = mode === VIEW_MODE_TUNER ? VIEW_MODE_TUNER : VIEW_MODE_GRAPH;
+  const nextMode = mode === VIEW_MODE_MULTI ? VIEW_MODE_MULTI : mode === VIEW_MODE_TUNER ? VIEW_MODE_TUNER : VIEW_MODE_GRAPH;
   if (state.view.mode === nextMode) {
     return;
   }
 
+  const changesEngine = isMultiMode() !== (nextMode === VIEW_MODE_MULTI);
+  const restart = changesEngine && state.micState === "running";
+  const preservePausedState = changesEngine && state.micState === "paused";
+  // Graph and Multi F0 are alternate analyses of the same piano roll. Keep the
+  // user's pitch viewport while swapping their independently retained data.
+  const sharedPitchRange = {
+    minMidi: state.view.minMidi,
+    maxMidi: state.view.maxMidi,
+  };
+  if (changesEngine) {
+    modeHistories[isMultiMode() ? "multi" : "single"] = createAnalysisSnapshot();
+    releaseCaptureResources();
+    setMicState(preservePausedState ? "paused" : "idle");
+  }
   state.view.mode = nextMode;
+  if (changesEngine) {
+    resetPitchHistoryState();
+    const history = modeHistories[isMultiMode() ? "multi" : "single"];
+    if (history) restoreAnalysisSnapshot(history);
+    state.view.minMidi = sharedPitchRange.minMidi;
+    state.view.maxMidi = sharedPitchRange.maxMidi;
+    els.exportBtn.disabled = state.pitchSamples.length === 0;
+    invalidateAnalysisQueue();
+    setMessage(preservePausedState ? "Paused" : isMultiMode() ? "Polyphonic analysis ready" : "Idle");
+  }
   if (isTunerMode()) {
     setTunerCenterFromCurrentOrHistory();
     state.view.pitchScrollbarDrag = null;
@@ -590,10 +620,11 @@ function setViewMode(mode) {
   markBackgroundDirty();
   updateStatus();
   draw();
+  if (restart) startMic();
 }
 
 function toggleViewMode() {
-  setViewMode(isTunerMode() ? VIEW_MODE_GRAPH : VIEW_MODE_TUNER);
+  setViewMode(isTunerMode() || isMultiMode() ? VIEW_MODE_GRAPH : VIEW_MODE_TUNER);
 }
 
 function trackViewModeSwitch(mode) {
@@ -604,7 +635,7 @@ function trackViewModeSwitch(mode) {
 
   try {
     gtag("event", "view_mode_switch", {
-      view_mode: mode === VIEW_MODE_TUNER ? "Tuner" : "Graph",
+      view_mode: mode === VIEW_MODE_MULTI ? "Multi F0" : mode === VIEW_MODE_TUNER ? "Tuner" : "Graph",
     });
   } catch (error) {
     // Analytics must not affect realtime UI operation.
@@ -613,8 +644,21 @@ function trackViewModeSwitch(mode) {
 
 function updateModeControls() {
   const tunerMode = isTunerMode();
-  const modeName = tunerMode ? "Tuner" : "Graph";
-  const toggleTitle = tunerMode ? "Switch to Graph" : "Switch to Tuner";
+  const modeName = isMultiMode() ? "Multi F0" : tunerMode ? "Tuner" : "Graph";
+  const toggleTitle = "Single F0 history";
+  const multiButton = document.getElementById("multiModeBtn");
+  if (multiButton) {
+    multiButton.disabled = isUploadProcessing() || state.micState === "requesting";
+    setAttribute(multiButton, "aria-pressed", String(isMultiMode()));
+  }
+  const tunerButton = document.getElementById("tunerModeBtn");
+  if (tunerButton) {
+    tunerButton.disabled = isUploadProcessing() || state.micState === "requesting";
+    setAttribute(tunerButton, "aria-pressed", String(tunerMode));
+  }
+  const legend = document.getElementById("multiLegend");
+  if (legend) legend.hidden = !isMultiMode();
+  setText(els.engineBadge, isMultiMode() ? "EffeTune DSP" : state.engine?.kind || "CREPE");
   const pitchZoomTitle = tunerMode ? "Pitch zoom disabled in Tuner mode" : "Zoom pitch in";
   const pitchZoomOutTitle = tunerMode ? "Pitch zoom disabled in Tuner mode" : "Zoom pitch out";
 
@@ -622,8 +666,8 @@ function updateModeControls() {
   if (els.modeToggleBtn.title !== toggleTitle) {
     els.modeToggleBtn.title = toggleTitle;
   }
-  setAttribute(els.modeToggleBtn, "aria-label", `Mode: ${modeName}`);
-  setAttribute(els.modeToggleBtn, "aria-pressed", String(tunerMode));
+  setAttribute(els.modeToggleBtn, "aria-label", "Graph: single F0 history");
+  setAttribute(els.modeToggleBtn, "aria-pressed", String(state.view.mode === VIEW_MODE_GRAPH));
 
   if (els.pitchZoomInBtn.disabled !== tunerMode) {
     els.pitchZoomInBtn.disabled = tunerMode;
@@ -805,6 +849,20 @@ function recomputeTunerAverageSamples() {
   }
 }
 
+function recomputeSinglePitchDerivedState() {
+  resetTunerAverageState();
+  resetSustainedDeviationState();
+  for (const sample of state.pitchSamples) {
+    sample.voiced = sample.frequency > 0
+      && Number.isFinite(sample.midiFloat)
+      && sample.midiFloat >= HARD_MIN_MIDI
+      && sample.midiFloat <= HARD_MAX_MIDI
+      && sample.confidence >= state.analysis.confidenceThreshold;
+    updateTunerAverageForSample(sample);
+    updateSustainedDeviationForSample(sample);
+  }
+}
+
 function getTunerCenterMidi() {
   if (Number.isFinite(state.view.tunerCenterMidi)) {
     return clamp(Math.round(state.view.tunerCenterMidi), HARD_MIN_MIDI, HARD_MAX_MIDI);
@@ -888,6 +946,7 @@ function compactRenderSample(sample) {
     return null;
   }
   return {
+    volumeDb: sample.volumeDb,
     timeSec: Number.isFinite(sample.timeSec) ? sample.timeSec : 0,
     frequency: Number.isFinite(sample.frequency) ? sample.frequency : 0,
     midiFloat: Number.isFinite(sample.midiFloat) ? sample.midiFloat : null,
@@ -1080,6 +1139,8 @@ function applyUploadControlLock() {
   const locked = isUploadProcessing();
   const controls = [
     els.modeToggleBtn,
+    document.getElementById("multiModeBtn"),
+    document.getElementById("tunerModeBtn"),
     els.overlayStartBtn,
     els.pauseBtn,
     els.clearBtn,
@@ -1094,7 +1155,7 @@ function applyUploadControlLock() {
 
   if (locked) {
     for (const control of controls) {
-      control.disabled = true;
+      if (control) control.disabled = true;
     }
     els.uploadInput.disabled = true;
     els.cancelUploadBtn.hidden = false;
@@ -1104,6 +1165,10 @@ function applyUploadControlLock() {
   }
 
   els.uploadBtn.disabled = false;
+  els.modeToggleBtn.disabled = state.micState === "requesting";
+  els.clearBtn.disabled = false;
+  els.timeZoomInBtn.disabled = false;
+  els.timeZoomOutBtn.disabled = false;
   els.uploadInput.disabled = false;
   els.thresholdInput.disabled = false;
   els.cancelUploadBtn.hidden = true;
@@ -1142,6 +1207,7 @@ function hideUploadOverlay() {
 
 function clonePitchSample(sample) {
   return {
+    volumeDb: sample.volumeDb,
     timeSec: sample.timeSec,
     frequency: sample.frequency,
     midiFloat: sample.midiFloat,
@@ -1171,6 +1237,8 @@ function createAnalysisSnapshot() {
     tunerAverage: { ...state.tunerAverage },
     sustainedDeviation: { ...state.sustainedDeviation },
     view: {
+      minMidi: state.view.minMidi,
+      maxMidi: state.view.maxMidi,
       followNow: state.view.followNow,
       manualRightTime: state.view.manualRightTime,
       selectionRange: cloneSelectionRange(state.view.selectionRange),
@@ -1194,11 +1262,17 @@ function restoreAnalysisSnapshot(snapshot) {
   Object.assign(state.tunerAverage, snapshot.tunerAverage);
   Object.assign(state.sustainedDeviation, snapshot.sustainedDeviation);
   state.view.followNow = snapshot.view.followNow;
+  state.view.minMidi = snapshot.view.minMidi;
+  state.view.maxMidi = snapshot.view.maxMidi;
   state.view.manualRightTime = snapshot.view.manualRightTime;
   state.view.hoverSample = snapshot.hoverIndex >= 0
     ? state.pitchSamples[snapshot.hoverIndex]
     : null;
   state.view.selectionRange = cloneSelectionRange(snapshot.view.selectionRange);
+
+  if (!isMultiMode()) {
+    recomputeSinglePitchDerivedState();
+  }
 
   if (!state.view.hoverSample && !state.view.selectionRange) {
     hideHint();
@@ -1259,6 +1333,7 @@ function setRunningMessage() {
 }
 
 function runningStatusMessage() {
+  if (isMultiMode()) return "Running · polyphonic";
   const hopMs = formatAdaptiveHopMs(state.analysis.hopSizeMs);
   return `Running (${hopMs} ms hop, ${adaptiveHopStatusLabel()})`;
 }
@@ -1305,6 +1380,10 @@ function invalidateAnalysisQueue() {
 }
 
 function releaseCaptureResources() {
+  if (state.multiNode) {
+    state.multiNode.close();
+    state.multiNode = null;
+  }
   stopAnimationLoop();
   invalidateAnalysisQueue();
   state.resampler = null;
@@ -1425,13 +1504,14 @@ async function startMic(options = {}) {
     state.resampler = new StreamingResampler(state.analysis.sampleRateInput, MODEL_SAMPLE_RATE);
     state.sourceNode = state.audioContext.createMediaStreamSource(state.stream);
 
-    await setupAudioCapture();
+    if (isMultiMode()) await setupMultiCapture();
+    else await setupAudioCapture();
     if (requestGeneration !== state.analysisGeneration || isPageHidden()) {
       pauseForDeactivation();
       return;
     }
 
-    await setupPitchEngine();
+    if (!isMultiMode()) await setupPitchEngine();
     if (requestGeneration !== state.analysisGeneration || isPageHidden()) {
       pauseForDeactivation();
       return;
@@ -1446,7 +1526,7 @@ async function startMic(options = {}) {
     setMicState("error");
     const message = error && error.name === "NotAllowedError"
       ? "Microphone permission was denied"
-      : "Failed to load the PitchCREPE model";
+      : isMultiMode() ? "EffeTune DSP could not start. Please retry in a browser with AudioWorklet support." : "Failed to load the PitchCREPE model";
     setMessage(message, true);
     console.error(error);
   }
@@ -1476,6 +1556,85 @@ async function setupAudioCapture() {
   }
 }
 
+async function setupMultiCapture() {
+  setMessage("Loading EffeTune Note Spectrogram");
+  const generation = state.analysisGeneration;
+  const context = state.audioContext;
+  const [{ EffeTuneNode }, api] = await Promise.all([
+    import("./vendor/effetune/dist/worklet.js"), import("./multi-f0.js"),
+  ]);
+  if (generation !== state.analysisGeneration) return;
+  const node = await EffeTuneNode.create(context, api.noteChain, { channels: 1 });
+  if (generation !== state.analysisGeneration) { node.close(); return; }
+  state.multiNode = node;
+  state.multiTimeOffset = state.latestTimeSec;
+  state.multiTimeOrigin = null;
+  node.subscribe((frame) => {
+    if (!isMultiMode() || state.multiNode !== node || state.micState !== "running"
+      || frame.kind !== "noteSpectrogram") return;
+    if (state.multiTimeOrigin === null) state.multiTimeOrigin = frame.timeSeconds;
+    const offset = state.multiTimeOffset - state.multiTimeOrigin;
+    const samples = api.observations(frame, offset);
+    state.latestTimeSec = Math.max(state.latestTimeSec, frame.timeSeconds + offset);
+    for (const sample of samples) addPitchSample(sample.timeSec, sample.frequency, sample.confidence,
+      { volumeDb: sample.volumeDb, autoScrollPitch: false, updateUi: false, trimHistory: false });
+    // Silence advances the clock too, without inventing an F0 observation.
+    const cutoff = state.latestTimeSec - MAX_HISTORY_SECONDS;
+    let expired = 0;
+    while (expired < state.pitchSamples.length && state.pitchSamples[expired].timeSec < cutoff) expired++;
+    if (expired) state.pitchSamples.splice(0, expired);
+    state.currentSample = samples.length ? state.pitchSamples[state.pitchSamples.length - 1] : null;
+    els.exportBtn.disabled = !state.pitchSamples.length;
+    state.view.followNow = true;
+    markBackgroundDirty();
+    requestStatusUpdate();
+  });
+  node.onprocessorerror = () => {
+    releaseCaptureResources();
+    setMicState("error");
+    setMessage("EffeTune DSP stopped. Start the microphone to retry.", true);
+  };
+  state.silentGain = context.createGain();
+  state.silentGain.gain.value = 0;
+  state.sourceNode.connect(node);
+  node.connect(state.silentGain);
+  state.silentGain.connect(context.destination);
+}
+
+function analyzeUploadedMultiAudio(audio, sampleRate, token) {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker("multi-f0-worker.js", { type: "module" });
+    const finish = (error, results) => {
+      worker.terminate();
+      token.abort = null;
+      if (error) reject(error); else resolve(results);
+    };
+    token.abort = () => finish(createUploadAbortError());
+    worker.onerror = (event) => finish(new Error(event.message));
+    worker.onmessage = ({ data }) => {
+      if (data.error) finish(new Error(data.error));
+      else if (data.results) {
+        data.results.duration = data.duration;
+        finish(null, data.results);
+      } else setUploadProgress("Analyzing polyphonic audio", UPLOAD_PROGRESS_ENGINE_END
+        + data.progress * (UPLOAD_PROGRESS_ANALYSIS_END - UPLOAD_PROGRESS_ENGINE_END));
+    };
+    worker.postMessage({ audio, sampleRate }, [audio.buffer]);
+  });
+}
+
+function currentMultiNotes() {
+  const notes = new Map();
+  for (let i = state.pitchSamples.length - 1; i >= 0; i--) {
+    const sample = state.pitchSamples[i];
+    if (sample.timeSec < state.latestTimeSec - 0.08) break;
+    if (!Number.isFinite(sample.midiFloat) || sample.confidence < getConfidenceThreshold()) continue;
+    const midi = Math.round(sample.midiFloat);
+    if (!notes.has(midi)) notes.set(midi, sample);
+  }
+  return [...notes.values()].sort((a, b) => a.midiFloat - b.midiFloat);
+}
+
 function setupScriptProcessorFallback() {
   const bufferSize = 1024;
   state.scriptNode = state.audioContext.createScriptProcessor(bufferSize, 1, 1);
@@ -1491,6 +1650,7 @@ function setupScriptProcessorFallback() {
 }
 
 async function setupPitchEngine() {
+  if (isMultiMode()) return;
   if (state.engine) {
     return;
   }
@@ -1525,6 +1685,7 @@ function resetSessionClock() {
 }
 
 function handleAudioChunk(inputChunk) {
+  if (isMultiMode()) return;
   if (state.micState !== "running" || !state.resampler) {
     return;
   }
@@ -1743,6 +1904,7 @@ function addPitchSample(timeSec, frequency, confidence, options = {}) {
     && confidence >= state.analysis.confidenceThreshold;
 
   const sample = {
+    volumeDb: options.volumeDb,
     timeSec,
     frequency: Number.isFinite(frequency) && frequency > 0 ? frequency : 0,
     midiFloat: hardRangeVoiced ? midiFloat : null,
@@ -1751,8 +1913,10 @@ function addPitchSample(timeSec, frequency, confidence, options = {}) {
     tunerAverageMidi: null,
   };
 
-  updateTunerAverageForSample(sample);
-  updateSustainedDeviationForSample(sample);
+  if (!isMultiMode()) {
+    updateTunerAverageForSample(sample);
+    updateSustainedDeviationForSample(sample);
+  }
   state.pitchSamples.push(sample);
   if (queueRender) {
     queueRendererSample(sample);
@@ -1803,6 +1967,10 @@ function togglePause() {
     setMessage("Paused");
   } else if (state.micState === "paused") {
     state.pausedByDeactivation = false;
+    if (isMultiMode()) {
+      state.multiTimeOrigin = null;
+      state.multiTimeOffset = state.latestTimeSec;
+    }
     if (!state.audioContext) {
       startMic({ resumePaused: true });
       return;
@@ -1831,6 +1999,10 @@ function clearHistory() {
   }
 
   resetPitchHistoryState();
+  if (state.multiNode) {
+    state.multiTimeOrigin = null;
+    state.multiTimeOffset = 0;
+  }
   updateStatus();
   draw();
 }
@@ -1840,7 +2012,7 @@ function exportCsv() {
     return;
   }
 
-  const header = "time_sec,f0_hz,midi_float,note_name,octave,cents_from_nearest,confidence,voiced";
+  const header = "time_sec,f0_hz,midi_float,note_name,octave,cents_from_nearest,confidence,voiced" + (isMultiMode() ? ",volume_db" : "");
   const rows = state.pitchSamples.map((sample) => {
     const row = csvRowForSample(sample);
     return [
@@ -1852,6 +2024,7 @@ function exportCsv() {
       row.voiced ? row.cents.toFixed(1) : "",
       row.confidence.toFixed(3),
       row.voiced ? "1" : "0",
+      ...(isMultiMode() ? [Number.isFinite(sample.volumeDb) ? sample.volumeDb.toFixed(2) : ""] : []),
     ].join(",");
   });
 
@@ -1897,6 +2070,7 @@ function cancelUploadProcessing() {
   state.upload.cancelRequested = true;
   if (state.upload.token) {
     state.upload.token.cancelled = true;
+    state.upload.token.abort?.();
   }
   setUploadProgress("Cancelling", state.upload.progress);
   applyUploadControlLock();
@@ -1945,7 +2119,7 @@ async function processUploadedAudio(file) {
     const monoAudio = await mixAudioBufferToMono(audioBuffer, token);
     checkUploadCancelled(token);
 
-    const modelAudio = await resampleAudioToModelRate(monoAudio, audioBuffer.sampleRate, token);
+    const modelAudio = isMultiMode() ? monoAudio : await resampleAudioToModelRate(monoAudio, audioBuffer.sampleRate, token);
     checkUploadCancelled(token);
 
     setUploadProgress("Preparing estimator", UPLOAD_PROGRESS_PREPARE_END);
@@ -1953,7 +2127,9 @@ async function processUploadedAudio(file) {
     checkUploadCancelled(token);
 
     setUploadProgress("Analyzing audio", UPLOAD_PROGRESS_ENGINE_END);
-    const results = await analyzeUploadedModelAudio(modelAudio, token);
+    const results = isMultiMode()
+      ? await analyzeUploadedMultiAudio(modelAudio, audioBuffer.sampleRate, token)
+      : await analyzeUploadedModelAudio(modelAudio, token);
     checkUploadCancelled(token);
 
     setUploadProgress("Updating graph", UPLOAD_PROGRESS_ANALYSIS_END);
@@ -2130,6 +2306,7 @@ function replacePitchHistoryWithUploadResults(results) {
 
   for (const result of results) {
     addPitchSample(result.timeSec, result.frequency, result.confidence, {
+      volumeDb: result.volumeDb,
       autoScrollPitch: false,
       queueRender: false,
       trimHistory: false,
@@ -2137,8 +2314,11 @@ function replacePitchHistoryWithUploadResults(results) {
     });
   }
 
+  if (isMultiMode() && Number.isFinite(results.duration)) state.latestTimeSec = results.duration;
   state.view.followNow = false;
-  state.view.manualRightTime = state.view.visibleSeconds;
+  state.view.manualRightTime = isMultiMode()
+    ? Math.max(state.view.visibleSeconds, state.latestTimeSec - MAX_HISTORY_SECONDS + state.view.visibleSeconds)
+    : state.view.visibleSeconds;
   state.view.hoverSample = null;
   state.view.selectionRange = null;
   els.exportBtn.disabled = state.pitchSamples.length === 0;
@@ -2334,6 +2514,10 @@ function renderStatusNow() {
     setCurrentStatusColumns();
   }
 
+  if (isMultiMode()) {
+    const notes = currentMultiNotes();
+    setCurrentStatusColumns({ hz: `${notes.length} notes`, conf: "Multi F0" });
+  }
   if (isTunerMode()) {
     setText(els.rangeStatus, `Tuner: ${midiLabel(getTunerCenterMidi())} ±50 cent`);
   } else {
@@ -2346,6 +2530,7 @@ function renderStatusNow() {
 }
 
 function getCurrentNoteLabel() {
+  if (isMultiMode()) return "";
   const current = state.currentSample && csvRowForSample(state.currentSample);
   if (!current || !current.voiced) {
     return "--";
@@ -2354,6 +2539,7 @@ function getCurrentNoteLabel() {
 }
 
 function getSustainedDeviationLabel() {
+  if (isMultiMode()) return "";
   const metric = state.sustainedDeviation;
   const current = state.currentSample;
   if (
@@ -2664,7 +2850,7 @@ function drawTrace() {
   ctx.clip();
 
   const tunerMode = isTunerMode();
-  if (!tunerMode) {
+  if (!tunerMode && !isMultiMode()) {
     drawDetectedNoteRoll(ctx, leftTime, rightTime, getEffectivePitchRange());
 
     let segmentOpen = false;
@@ -2715,6 +2901,10 @@ function drawTrace() {
     }
     const x = timeToX(sample.timeSec, rightTime);
     const y = midiToY(sample.midiFloat);
+    if (isMultiMode()) {
+      drawMultiPoint(ctx, x, y, sample);
+      continue;
+    }
     ctx.beginPath();
     ctx.arc(x, y, 2.2, 0, Math.PI * 2);
     ctx.fillStyle = sample.confidence >= HIGH_CONFIDENCE_THRESHOLD ? UI_THEME.traceHot : UI_THEME.traceWarm;
@@ -3064,6 +3254,8 @@ function sampleIsVisible(sample, leftTime, rightTime) {
 }
 
 function chooseTimeGridStep(seconds) {
+  const minimumStep = seconds * 56 / Math.max(1, state.canvas.width - PITCH_AXIS_WIDTH);
+  if (isMultiMode()) return [0.25, 0.5, 1, 2, 5, 10, 20].find(step => step >= minimumStep) || 20;
   if (seconds <= 4) {
     return 0.25;
   }
@@ -3767,6 +3959,7 @@ function showHint(sample, x, y) {
     `F0: ${row.frequency.toFixed(2)} Hz`,
     `MIDI: ${row.midiFloat.toFixed(3)}`,
     `Confidence: ${row.confidence.toFixed(2)}`,
+    ...(Number.isFinite(sample.volumeDb) ? [`Volume: ${sample.volumeDb.toFixed(1)} dB`] : []),
   ].join("<br>");
   positionHint(x, y);
 }
@@ -3937,7 +4130,9 @@ function handlePageHide() {
 }
 
 function bindEvents() {
-  els.modeToggleBtn.addEventListener("click", toggleViewMode);
+  document.getElementById("multiModeBtn")?.addEventListener("click", () => setViewMode(VIEW_MODE_MULTI));
+  document.getElementById("tunerModeBtn")?.addEventListener("click", () => setViewMode(VIEW_MODE_TUNER));
+  els.modeToggleBtn.addEventListener("click", () => setViewMode(VIEW_MODE_GRAPH));
   els.overlayStartBtn.addEventListener("click", startMic);
   els.pauseBtn.addEventListener("click", togglePause);
   els.clearBtn.addEventListener("click", clearHistory);
@@ -3956,15 +4151,17 @@ function bindEvents() {
 
     state.analysis.confidenceThreshold = Number(els.thresholdInput.value);
     els.thresholdValue.value = state.analysis.confidenceThreshold.toFixed(2);
-    for (const sample of state.pitchSamples) {
-      sample.voiced = sample.frequency > 0
-        && Number.isFinite(sample.midiFloat)
-        && sample.midiFloat >= HARD_MIN_MIDI
-        && sample.midiFloat <= HARD_MAX_MIDI
-        && sample.confidence >= state.analysis.confidenceThreshold;
+    if (isMultiMode()) {
+      for (const sample of state.pitchSamples) {
+        sample.voiced = sample.frequency > 0
+          && Number.isFinite(sample.midiFloat)
+          && sample.midiFloat >= HARD_MIN_MIDI
+          && sample.midiFloat <= HARD_MAX_MIDI
+          && sample.confidence >= state.analysis.confidenceThreshold;
+      }
+    } else {
+      recomputeSinglePitchDerivedState();
     }
-    recomputeTunerAverageSamples();
-    resetSustainedDeviationState();
     replaceRendererSamples();
     saveSettings();
     const pitchRangeChanged = autoScrollPitchToSample(state.currentSample);

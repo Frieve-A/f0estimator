@@ -14,6 +14,7 @@ const viewport = {
 };
 const verifyMic = process.env.VERIFY_MIC === "1";
 const browser = await chromium.launch({
+  ...(process.env.PLAYWRIGHT_CHANNEL ? { channel: process.env.PLAYWRIGHT_CHANNEL } : {}),
   headless: true,
   args: verifyMic
     ? ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"]
@@ -210,13 +211,15 @@ async function verifySelectionHint(page) {
       && html.includes("G4")
       && html.includes("C4")
       && html.includes("n=2");
-    return {
+    const result = {
       ok,
       reason: ok ? "" : "selection table did not contain expected rows",
       hidden: hint.hidden,
       hasClass: hint.classList.contains("selection-hint"),
       html,
     };
+    window.clearHistory();
+    return result;
   });
 }
 

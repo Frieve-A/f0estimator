@@ -141,6 +141,8 @@ const canvasContext = {
 
 const elementIds = [
   "modeToggleBtn",
+  "tunerModeBtn",
+  "multiModeBtn",
   "modeValue",
   "overlayStartBtn",
   "pauseBtn",
@@ -386,7 +388,7 @@ for (let i = 0; i < 6; i += 1) {
 }
 assert(elements.get("rangeStatus").textContent.includes("C1-C8"), "graph pitch zoom should reach the C8 display ceiling");
 
-click("modeToggleBtn");
+click("tunerModeBtn");
 assert(elements.get("modeValue").textContent === "Tuner", "mode should switch to Tuner");
 assert(elements.get("pitchZoomInBtn").disabled === true, "pitch zoom in should be disabled in Tuner");
 assert(elements.get("pitchZoomOutBtn").disabled === true, "pitch zoom out should be disabled in Tuner");
