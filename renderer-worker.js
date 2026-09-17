@@ -1,7 +1,6 @@
 "use strict";
 importScripts("multi-f0-visual.js");
 
-const MODEL_SAMPLE_RATE = 16000;
 const MAX_HISTORY_SECONDS = 10 * 60;
 const HARD_MIN_MIDI = 24;
 const HARD_MAX_MIDI = 108;

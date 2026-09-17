@@ -1,6 +1,6 @@
 {
   "abiVersion": 1,
-  "sourceDigest": "sha256:90549b24002bff49d9b1083419fa9c82294c48239de45281e3f3186b93461584",
+  "sourceDigest": "sha256:5fa7ec81d2f742afd1b9c0c5311f38d722514b594367ee4e7a08f0b52944613f",
   "emsdkVersion": "6.0.2",
   "g726PerformanceInput": {
     "contract": "g726-production-performance-input-sha256-v2",
@@ -410,14 +410,20 @@
       "assets": []
     },
     {
+      "name": "PitchMeterPlugin",
+      "hash": 2658803801,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
       "name": "SpectrogramPlugin",
-      "hash": 3382561824,
+      "hash": 1047398425,
       "byteCapacity": 0,
       "assets": []
     },
     {
       "name": "SpectrumAnalyzerPlugin",
-      "hash": 3382561824,
+      "hash": 1047398425,
       "byteCapacity": 0,
       "assets": []
     },
@@ -787,6 +793,12 @@
       "assets": []
     },
     {
+      "name": "TVAudioSimulatorPlugin",
+      "hash": 196010340,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
       "name": "VinylArtifactsPlugin",
       "hash": 1145282217,
       "byteCapacity": 0,
@@ -1035,6 +1047,12 @@
       "assets": []
     },
     {
+      "name": "SpatialMapperPlugin",
+      "hash": 3460871461,
+      "byteCapacity": 0,
+      "assets": []
+    },
+    {
       "name": "StereoBlendPlugin",
       "hash": 648556109,
       "byteCapacity": 0,
@@ -1042,7 +1060,7 @@
     }
   ],
   "sizes": {
-    "baseline": 7000109,
-    "simd": 7126702
+    "baseline": 7077241,
+    "simd": 7210666
   }
 }

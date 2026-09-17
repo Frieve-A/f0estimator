@@ -1,4 +1,4 @@
-// EffeTune DSP 0.9.0: pitch bins are spaced at 20 cents, A0 through C8.
+// EffeTune DSP 0.10.0: pitch bins are spaced at 20 cents, A0 through C8.
 export const noteChain = {
   version: 1,
   chain: [{ id: "notes", type: "NoteSpectrogram", parameters: {

@@ -5,14 +5,23 @@ const SPECTRUM_FRAME = 4;
 const SPECTROGRAM_FRAME = 5;
 const STEREO_FRAME = 6;
 const NOTE_SPECTROGRAM_FRAME = 24;
+const PITCH_METER_FRAME = 26;
+const PITCH_METER_MIN_DETECTED_MIDI = 20.5;
+const PITCH_METER_MAX_DETECTED_MIDI = 108.5;
+const MULTIRES_HQ_HEADER_BYTES = 48;
+const MULTIRES_HQ_MIN_FREQUENCY = 20;
+const MULTIRES_HQ_MAX_FREQUENCY = 40000;
+const MULTIRES_HQ_SPECTRUM_CELLS = 2048;
+const MULTIRES_HQ_SPECTROGRAM_CELLS = 256;
 
 const ANALYZER_FRAMES = Object.freeze({
-  LevelMeter: [LEVEL_FRAME, 1],
-  NoteSpectrogram: [NOTE_SPECTROGRAM_FRAME, 3],
-  Oscilloscope: [SCOPE_FRAME, 2],
-  SpectrumAnalyzer: [SPECTRUM_FRAME, 1],
-  Spectrogram: [SPECTROGRAM_FRAME, 1],
-  StereoMeter: [STEREO_FRAME, 2]
+  LevelMeter: [LEVEL_FRAME, [1]],
+  NoteSpectrogram: [NOTE_SPECTROGRAM_FRAME, [3]],
+  Oscilloscope: [SCOPE_FRAME, [2]],
+  PitchMeter: [PITCH_METER_FRAME, [1]],
+  SpectrumAnalyzer: [SPECTRUM_FRAME, [1, 2]],
+  Spectrogram: [SPECTROGRAM_FRAME, [1, 2]],
+  StereoMeter: [STEREO_FRAME, [2]]
 });
 
 export const TELEMETRY_RING_BYTES = 256 * 1024;
@@ -202,6 +211,101 @@ function decodeSpectrogram(payload, node, sequence, dropped) {
   };
 }
 
+function decodeMultiresHq(payload, node, sequence, dropped, frameType) {
+  if (payload.byteLength < MULTIRES_HQ_HEADER_BYTES) return null;
+  const sampleRate = payload.getFloat32(0, true);
+  const points = payload.getUint16(4, true);
+  const flags = payload.getUint16(6, true);
+  const hop = payload.getUint32(8, true);
+  const generation = payload.getUint32(12, true);
+  const captureEnd = payload.getBigUint64(16, true);
+  const frameIndex = payload.getUint32(24, true);
+  const cellCount = payload.getUint32(28, true);
+  const minFrequency = payload.getFloat32(32, true);
+  const maxFrequency = payload.getFloat32(36, true);
+  const firstValidIndex = payload.getUint32(40, true);
+  const validCellCount = payload.getUint32(44, true);
+  const isSpectrum = frameType === SPECTRUM_FRAME;
+  if (!Number.isFinite(sampleRate) || sampleRate <= 0 || points < 8 || points > 14 ||
+      flags !== 0 || generation === 0) {
+    return null;
+  }
+  const expectedCellCount = isSpectrum
+    ? MULTIRES_HQ_SPECTRUM_CELLS
+    : MULTIRES_HQ_SPECTROGRAM_CELLS;
+  const size = 1 << points;
+  const expectedHop = isSpectrum
+    ? Math.max(size / 2, Math.ceil(sampleRate / 30))
+    : size / 2;
+  if (cellCount !== expectedCellCount || hop !== expectedHop ||
+      minFrequency !== MULTIRES_HQ_MIN_FREQUENCY ||
+      maxFrequency !== MULTIRES_HQ_MAX_FREQUENCY) {
+    return null;
+  }
+  let expectedFirstValidIndex = cellCount;
+  let expectedValidCellCount = 0;
+  const logStep = Math.log(
+    MULTIRES_HQ_MAX_FREQUENCY / MULTIRES_HQ_MIN_FREQUENCY
+  ) / (cellCount - 1);
+  for (let index = 0; index < cellCount; index++) {
+    const ascending = isSpectrum ? index : cellCount - 1 - index;
+    const frequency = ascending === cellCount - 1
+      ? MULTIRES_HQ_MAX_FREQUENCY
+      : MULTIRES_HQ_MIN_FREQUENCY * Math.exp(ascending * logStep);
+    if (frequency <= sampleRate * 0.5) {
+      if (expectedFirstValidIndex === cellCount) expectedFirstValidIndex = index;
+      expectedValidCellCount += 1;
+    }
+  }
+  if (expectedValidCellCount === 0) expectedFirstValidIndex = 0;
+  const valueBytes = isSpectrum ? cellCount * 8 : cellCount;
+  if (firstValidIndex !== expectedFirstValidIndex ||
+      validCellCount !== expectedValidCellCount ||
+      payload.byteLength !== MULTIRES_HQ_HEADER_BYTES + valueBytes) {
+    return null;
+  }
+  const metadata = {
+    sampleRate,
+    points,
+    hop,
+    generation,
+    captureEnd,
+    frameIndex,
+    cellCount,
+    minFrequency,
+    maxFrequency,
+    firstValidIndex,
+    validCellCount
+  };
+  if (isSpectrum) {
+    const currentDb = new Float32Array(cellCount);
+    const peakDb = new Float32Array(cellCount);
+    const peakOffset = MULTIRES_HQ_HEADER_BYTES + cellCount * 4;
+    for (let cell = 0; cell < cellCount; cell++) {
+      const current = payload.getFloat32(MULTIRES_HQ_HEADER_BYTES + cell * 4, true);
+      const peak = payload.getFloat32(peakOffset + cell * 4, true);
+      if (!Number.isFinite(current) || !Number.isFinite(peak)) return null;
+      currentDb[cell] = current;
+      peakDb[cell] = peak;
+    }
+    return {
+      ...common(node, 'spectrumHq', sequence, dropped),
+      ...metadata,
+      currentDb,
+      peakDb
+    };
+  }
+  const intensities = new Uint8Array(cellCount);
+  for (let cell = 0; cell < cellCount; cell++) {
+    intensities[cell] = payload.getUint8(MULTIRES_HQ_HEADER_BYTES + cell);
+  }
+  return {
+    ...common(node, 'spectrogramHq', sequence, dropped),
+    ...metadata,
+    intensities
+  };
+}
+
 function decodeNoteSpectrogram(payload, node, sequence, dropped) {
   if (payload.byteLength !== 3548) return null;
   const sampleRate = payload.getFloat32(0, true);
@@ -240,6 +344,50 @@ function decodeNoteSpectrogram(payload, node, sequence, dropped) {
     generation,
     levels,
     volumeDb
+  };
+}
+
+function decodePitchMeter(payload, node, sequence, dropped) {
+  if (payload.byteLength !== 44) return null;
+  const sampleRate = payload.getFloat32(0, true);
+  const timeSeconds = payload.getFloat32(4, true);
+  const hopSeconds = payload.getFloat32(8, true);
+  const frameIndex = payload.getUint32(12, true);
+  const generation = payload.getUint32(16, true);
+  const f0Hz = payload.getFloat32(20, true);
+  const midi = payload.getFloat32(24, true);
+  const cents = payload.getFloat32(28, true);
+  const confidence = payload.getFloat32(32, true);
+  const levelDb = payload.getFloat32(36, true);
+  const flags = payload.getUint16(40, true);
+  const reserved = payload.getUint16(42, true);
+  const voiced = (flags & 1) !== 0;
+  if (!Number.isFinite(sampleRate) || sampleRate <= 0 ||
+      !Number.isFinite(timeSeconds) || timeSeconds < 0 ||
+      !Number.isFinite(hopSeconds) || hopSeconds <= 0 || generation === 0 ||
+      !Number.isFinite(f0Hz) || !Number.isFinite(midi) ||
+      !Number.isFinite(cents) || !Number.isFinite(confidence) ||
+      confidence < 0 || confidence > 1 || !Number.isFinite(levelDb) ||
+      (flags & ~1) !== 0 || reserved !== 0 ||
+      (voiced
+        ? f0Hz <= 0 || midi < PITCH_METER_MIN_DETECTED_MIDI ||
+          midi > PITCH_METER_MAX_DETECTED_MIDI || cents < -50 || cents > 50
+        : f0Hz !== 0 || midi !== 0 || cents !== 0 || confidence !== 0)) {
+    return null;
+  }
+  return {
+    ...common(node, 'pitch', sequence, dropped),
+    sampleRate,
+    timeSeconds,
+    hopSeconds,
+    frameIndex,
+    generation,
+    f0Hz,
+    midi,
+    cents,
+    confidence,
+    levelDb,
+    voiced
   };
 }
 
@@ -292,7 +440,11 @@ function decodeStereo(payload, node, sequence, dropped) {
   };
 }
 
-function decodePayload(frameType, payload, node, sequence, dropped) {
+function decodePayload(frameType, formatVersion, payload, node, sequence, dropped) {
+  if (formatVersion === 2 &&
+      (frameType === SPECTRUM_FRAME || frameType === SPECTROGRAM_FRAME)) {
+    return decodeMultiresHq(payload, node, sequence, dropped, frameType);
+  }
   switch (frameType) {
     case LEVEL_FRAME:
       return decodeLevel(payload, node, sequence, dropped);
@@ -306,6 +458,8 @@ function decodePayload(frameType, payload, node, sequence, dropped) {
       return decodeStereo(payload, node, sequence, dropped);
     case NOTE_SPECTROGRAM_FRAME:
       return decodeNoteSpectrogram(payload, node, sequence, dropped);
+    case PITCH_METER_FRAME:
+      return decodePitchMeter(payload, node, sequence, dropped);
     default:
       return null;
   }
@@ -331,13 +485,15 @@ export function decodeTelemetryPacket(packet, bytes, nodesByTap, initialDropped 
     if (frameBytes > bytes - offset) break;
     const node = nodesByTap.get(tapId);
     const expected = node ? ANALYZER_FRAMES[node.effectType] : null;
-    if (expected?.[0] === frameType && expected[1] === formatVersion) {
+    if (expected?.[0] === frameType && expected[1].includes(formatVersion)) {
       const payload = new DataView(
         packet.buffer,
         packet.byteOffset + offset + HEADER_BYTES,
         payloadBytes
       );
-      const decoded = decodePayload(frameType, payload, node, sequence, pendingDropped);
+      const decoded = decodePayload(
+        frameType, formatVersion, payload, node, sequence, pendingDropped
+      );
       if (decoded) {
         frames.push(decoded);
         pendingDropped = 0;

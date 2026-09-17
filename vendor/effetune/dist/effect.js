@@ -89,7 +89,7 @@ export function validateParameterValue(effectType, definition, value) {
 
 export function canonicalizeProcessingParameters(effectType, parameters) {
   const canonical = { ...parameters };
-  if (effectType === 'NoteSpectrogram' &&
+  if ((effectType === 'NoteSpectrogram' || effectType === 'PitchMeter') &&
       canonical.minimumMidi > canonical.maximumMidi) {
     [canonical.minimumMidi, canonical.maximumMidi] =
       [canonical.maximumMidi, canonical.minimumMidi];

@@ -75,17 +75,15 @@ node tools/verify-multi-f0.mjs http://localhost:4173
 node tools/verify-browser.mjs http://localhost:4173
 ```
 
-`tools/verify-tuner-mode.mjs` checks the monophonic and Tuner behavior. `tools/verify-multi-f0.mjs` runs the actual EffeTune WASM against a synthetic chord and checks file analysis, cancellation, microphone routing, engine isolation, CSV output, both renderer paths, offline loading, and mobile layout. The browser checks require Playwright and Chrome to be available locally. Set `VERIFY_MIC=1` when running `tools/verify-browser.mjs` to include its fake-microphone startup check.
+`tools/verify-tuner-mode.mjs` checks the monophonic and Tuner behavior. `tools/verify-multi-f0.mjs` runs the actual EffeTune WASM and checks monophonic and polyphonic file analysis through their dedicated workers, cancellation, microphone routing, CSV output, both renderer paths, offline loading, and mobile layout. The browser checks require Playwright and Chrome to be available locally. Set `VERIFY_MIC=1` when running `tools/verify-browser.mjs` to include its fake-microphone startup check.
 
 ## Developer Notes
 
 ### Inference
 
-Graph and Tuner modes use the monophonic F0 pipeline. The browser loads the CREPE model with TensorFlow.js and falls back to YIN if the model is unavailable. Following the PitchCREPE specification, CREPE input is resampled to 16 kHz and its `time_sec`, `f0_hz`, and `confidence` output is converted to MIDI values.
+Graph and Tuner modes use EffeTune DSP 0.10.0 Pitch Meter for monophonic F0 estimation from C1 through C8. Multi F0 mode uses the same DSP library's Note Spectrogram at the input sample rate.
 
-The graph display can scroll up to C8. The current CREPE model output itself is effectively limited near the B6/C7 area, while the YIN fallback searches up to the C8 display ceiling. Realtime inference begins at a 10 ms hop and can adapt the hop up to 250 ms under load. Uploaded audio is decoded by the browser, analyzed offline through the same pitch pipeline, and uses the same 10-minute retained-history limit as the realtime graph.
-
-Multi F0 mode uses EffeTune DSP 0.9.0 Note Spectrogram at the input sample rate. Live input runs through EffeTune's AudioWorklet, while uploaded files are analyzed in a dedicated Web Worker. This mode does not initialize or invoke CREPE or YIN. The EffeTune JavaScript runtime, baseline and SIMD WASM files, and license notices are included under `vendor/effetune`, allowing the Multi F0 engine to load without an external model download. Live Multi F0 analysis requires AudioWorklet support.
+Live input for both analysis paths runs through EffeTune's AudioWorklet. Uploaded files are decoded by the browser and analyzed with the corresponding EffeTune effect in a dedicated Web Worker. The JavaScript runtime, baseline and SIMD WASM files, and license notices are included under `vendor/effetune`, so neither mode downloads an external model. Live analysis requires AudioWorklet support. Uploaded audio and realtime input both use the same 10-minute retained-history limit.
 
 ### CSV
 
@@ -106,10 +104,6 @@ time_sec,f0_hz,midi_float,note_name,octave,cents_from_nearest,confidence,voiced,
 ### Rendering and Offline Shell
 
 Rendering uses an OffscreenCanvas Web Worker when supported, with a main-thread canvas fallback. The app includes a web manifest and service worker for installable/offline app-shell behavior.
-
-### License Notes
-
-Third-party components remain under their respective licenses. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for their licenses, sources, usage, and redistribution notices.
 
 ---
 
@@ -190,17 +184,15 @@ node tools/verify-multi-f0.mjs http://localhost:4173
 node tools/verify-browser.mjs http://localhost:4173
 ```
 
-`tools/verify-tuner-mode.mjs` は単音解析とTunerモードの動作を確認します。`tools/verify-multi-f0.mjs` は実際のEffeTune WASMに合成和音を入力し、ファイル解析、Cancel時の復元、マイク経路、単音エンジンとの分離、CSV、2種類の描画経路、オフライン読み込み、モバイル表示を確認します。ブラウザ検証にはPlaywrightとChromeが必要です。`tools/verify-browser.mjs` で `VERIFY_MIC=1` を指定すると、疑似マイクによる起動確認も行います。
+`tools/verify-tuner-mode.mjs` は単音解析とTunerモードの動作を確認します。`tools/verify-multi-f0.mjs` は実際のEffeTune WASMを使い、単音・多音それぞれの専用Workerを介したファイル解析、Cancel時の復元、マイク経路、CSV、2種類の描画経路、オフライン読み込み、モバイル表示を確認します。ブラウザ検証にはPlaywrightとChromeが必要です。`tools/verify-browser.mjs` で `VERIFY_MIC=1` を指定すると、疑似マイクによる起動確認も行います。
 
 ### 開発者向け情報
 
 #### 推論
 
-Graph／Tunerモードは単音F0推定パイプラインを使用します。ブラウザではTensorFlow.jsでCREPEモデルを読み込み、モデルを利用できない場合はYINへフォールバックします。PitchCREPEの仕様に合わせて入力を16 kHzへリサンプリングし、`time_sec`、`f0_hz`、`confidence` の出力をMIDI値へ変換します。
+Graph／Tunerモードは、EffeTune DSP 0.10.0のPitch Meterを使用してC1からC8までの単音F0を推定します。Multi F0モードは、同じDSPライブラリのNote Spectrogramを入力サンプルレートのまま使用します。
 
-グラフ表示はC8までスクロールできます。現在のCREPEモデル出力自体は実質的にB6/C7付近までで、YIN fallbackは表示上限に合わせてC8まで探索します。リアルタイム推論のhopは10msから開始し、処理負荷に応じて最大250msまで自動調整します。アップロード音声はブラウザでデコードし、同じピッチ推定パイプラインでオフライン解析します。保持履歴はリアルタイム表示と同じく最大10分です。
-
-Multi F0モードは、入力サンプルレートのままEffeTune DSP 0.9.0のNote Spectrogramを使用します。リアルタイム入力はEffeTuneのAudioWorklet、アップロードファイルは専用Web Workerで解析します。このモードではCREPEとYINを初期化・実行しません。EffeTuneのJavaScriptランタイム、baseline／SIMD版WASM、ライセンス情報は `vendor/effetune` に同梱しているため、Multi F0の起動時に外部モデルをダウンロードする必要はありません。リアルタイムのMulti F0解析にはAudioWorklet対応ブラウザが必要です。
+両方の解析経路で、リアルタイム入力はEffeTuneのAudioWorklet、アップロードファイルは対応するEffeTune effectを専用Web Workerで解析します。EffeTuneのJavaScriptランタイム、baseline／SIMD版WASM、ライセンス情報は `vendor/effetune` に同梱しているため、どちらのモードも外部モデルをダウンロードしません。リアルタイム解析にはAudioWorklet対応ブラウザが必要です。保持履歴はアップロード音声、リアルタイム入力とも最大10分です。
 
 #### CSV
 
@@ -221,7 +213,3 @@ time_sec,f0_hz,midi_float,note_name,octave,cents_from_nearest,confidence,voiced,
 #### 描画とオフラインapp shell
 
 描画は対応ブラウザではOffscreenCanvas Web Workerを使い、非対応環境ではメインスレッドCanvasへfallbackします。web manifestとservice workerを含み、インストール可能なPWA風のapp shellキャッシュに対応しています。
-
-#### ライセンス注意
-
-サードパーティ製コンポーネントには、それぞれのライセンスが適用されます。ライセンス、入手元、利用形態、再配布時の告知については [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) を参照してください。

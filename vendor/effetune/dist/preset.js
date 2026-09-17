@@ -272,9 +272,13 @@ const LEGACY_ECHOED_STRUCTURAL_KEYS_V1 = Object.freeze(['pluginType', 'ch', 'ib'
 // dropped for these two effects only.
 const LEGACY_ECHOED_ENABLED_EFFECTS_V1 = Object.freeze(['HornResonator', 'HornResonatorPlus']);
 
-// These analyzers persist their frequency-axis choice for display only. Validate
-// the known values before discarding it so other unknown parameters remain strict.
+// These analyzers persist their frequency-axis choice. Log (HQ) selects the public
+// DSP option; the ordinary Log and Linear choices remain display-only.
 const LEGACY_FREQUENCY_SCALE_EFFECTS_V1 = Object.freeze(['SpectrumAnalyzer', 'Spectrogram']);
+
+// These analyzers also persist a display-only keyboard guide. Validate the
+// boolean before discarding it so other unknown parameters remain strict.
+const LEGACY_KEYBOARD_DISPLAY_EFFECTS_V1 = Object.freeze(['SpectrumAnalyzer', 'Spectrogram']);
 
 function dropEchoedStructuralKeysV1(parameters, effectType) {
   for (const key of LEGACY_ECHOED_STRUCTURAL_KEYS_V1) delete parameters[key];
@@ -367,10 +371,50 @@ function prepareLegacyParametersV1(effectType, source) {
   const parameters = dropEchoedStructuralKeysV1({ ...source }, effectType);
   if (LEGACY_FREQUENCY_SCALE_EFFECTS_V1.includes(effectType) &&
       Object.hasOwn(parameters, 'sc')) {
-    if (parameters.sc !== 'log' && parameters.sc !== 'linear') {
+    const scale = parameters.sc;
+    if (scale !== 'log' && scale !== 'log-hq' && scale !== 'linear') {
       throw new ValidationError(`Legacy ${effectType} contains invalid frequency scale display state.`);
     }
     delete parameters.sc;
+    const highQualityLog = scale === 'log-hq';
+    if (Object.hasOwn(parameters, 'hq')) {
+      if (typeof parameters.hq !== 'boolean' || parameters.hq !== highQualityLog) {
+        throw new ValidationError(
+          `Legacy ${effectType} contains conflicting frequency scale and HQ settings.`
+        );
+      }
+    } else if (highQualityLog) {
+      parameters.hq = true;
+    }
+  }
+  if (LEGACY_KEYBOARD_DISPLAY_EFFECTS_V1.includes(effectType) &&
+      Object.hasOwn(parameters, 'kb')) {
+    if (typeof parameters.kb !== 'boolean') {
+      throw new ValidationError(`Legacy ${effectType} contains invalid keyboard display state.`);
+    }
+    delete parameters.kb;
+  }
+  if (effectType === 'SpectrumAnalyzer' && Object.hasOwn(parameters, 'dm')) {
+    if (parameters.dm !== 'line' && parameters.dm !== 'bar') {
+      throw new ValidationError('Legacy SpectrumAnalyzer contains invalid display mode state.');
+    }
+    delete parameters.dm;
+  }
+  if (effectType === 'NoteSpectrogram') {
+    // These app settings only control the piano-roll display.
+    for (const key of ['cl', 'pr', 'ly', 'vl', 'ts']) delete parameters[key];
+  }
+  if (effectType === 'PitchMeter' && Object.hasOwn(parameters, 'ly')) {
+    if (parameters.ly !== 'Vertical' && parameters.ly !== 'Horizontal') {
+      throw new ValidationError('Legacy PitchMeter contains invalid layout state.');
+    }
+    delete parameters.ly;
+  }
+  if (effectType === 'PitchMeter' && Object.hasOwn(parameters, 'ly')) {
+    if (parameters.ly !== 'Vertical' && parameters.ly !== 'Horizontal') {
+      throw new ValidationError('Legacy PitchMeter contains invalid layout state.');
+    }
+    delete parameters.ly;
   }
   let processingEnabled = true;
   if (effectType === 'Matrix' && Object.hasOwn(parameters, 'mx')) {

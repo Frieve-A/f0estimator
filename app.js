@@ -1,12 +1,5 @@
 "use strict";
 
-const MODEL_SAMPLE_RATE = 16000;
-const MIN_HOP_MS = 10;
-const MAX_HOP_MS = 250;
-const MIN_HOP_SAMPLES = Math.round((MODEL_SAMPLE_RATE * MIN_HOP_MS) / 1000);
-const MAX_HOP_SAMPLES = Math.round((MODEL_SAMPLE_RATE * MAX_HOP_MS) / 1000);
-const FRAME_SIZE = 1024;
-const FRAME_CENTER_MS = (FRAME_SIZE / 2 / MODEL_SAMPLE_RATE) * 1000;
 const MAX_HISTORY_SECONDS = 10 * 60;
 const HARD_MIN_MIDI = 24;
 const HARD_MAX_MIDI = 108;
@@ -15,7 +8,7 @@ const VIEW_MODE_GRAPH = "graph";
 const VIEW_MODE_TUNER = "tuner";
 const VIEW_MODE_MULTI = "multi";
 const modeHistories = {};
-const RENDERER_WORKER_URL = "renderer-worker.js?v=15";
+const RENDERER_WORKER_URL = "renderer-worker.js?v=16";
 const TUNER_DEFAULT_CENTER_MIDI = 69;
 const TUNER_HALF_RANGE_MIDI = 0.5;
 const TUNER_CENT_GRID_STEP = 10;
@@ -42,28 +35,12 @@ const GRAPH_TAP_MOVE_PX = 6;
 const RANGE_LONG_PRESS_MS = 420;
 const RANGE_SELECTION_MIN_SIZE_PX = 4;
 const SCROLLBAR_TIME_CLEARANCE_PX = 4;
-const TARGET_INFERENCE_LOAD = 0.7;
-const INFERENCE_EWMA_ALPHA = 0.12;
-const MAX_TRACKED_INFERENCE_MS = 1000;
-const HOP_CONTROL_INTERVAL_MS = 1500;
-const HOP_INCREASE_RATIO = 1.12;
-const HOP_DECREASE_RATIO = 0.8;
-const QUEUE_RELAXED_MS = 90;
-const QUEUE_PRESSURE_MS = 220;
-const QUEUE_LATENCY_LIMIT_MS = 300;
-const QUEUE_TARGET_LATENCY_MS = 180;
-const QUEUE_RECOVERY_MS = 140;
-const RUNNING_STATUS_CATCHUP_MS = 2500;
-const RUNNING_STATUS_ADAPTING_MS = 2500;
 const UPLOAD_PROGRESS_DECODE_END = 0.14;
 const UPLOAD_PROGRESS_PREPARE_END = 0.22;
 const UPLOAD_PROGRESS_ENGINE_END = 0.28;
 const UPLOAD_PROGRESS_ANALYSIS_END = 0.98;
 const UPLOAD_PROGRESS_COMMIT_END = 1;
-const UPLOAD_ANALYSIS_YIELD_FRAMES = 4;
 const UPLOAD_AUDIO_CHUNK_SAMPLES = 65536;
-const CREPE_TFJS_URL = "https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js";
-const CREPE_MODEL_URL = "https://cdn.jsdelivr.net/gh/ml5js/ml5-data-and-models/models/pitch-detection/crepe/model.json";
 const STORAGE_KEY = "frieve-f0-estimator-settings-v1";
 const NOTE_NAMES = ["C", "C♯", "D", "E♭", "E", "F", "F♯", "G", "A♭", "A", "B♭", "B"];
 const UI_THEME = {
@@ -140,20 +117,16 @@ const state = {
   audioContext: null,
   stream: null,
   sourceNode: null,
-  captureNode: null,
   silentGain: null,
-  scriptNode: null,
-  resampler: null,
-  engine: null,
-  modelQueue: new Float32Array(0),
-  processingQueue: false,
+  dspNode: null,
   analysisGeneration: 0,
   animationFrameId: null,
   pausedByDeactivation: false,
-  frameStartSample: 0,
   pitchSamples: [],
   currentSample: null,
   latestTimeSec: 0,
+  pitchTimeOrigin: null,
+  pitchTimeOffset: 0,
   tunerAverage: {
     midiFloat: null,
     noteMidi: null,
@@ -184,17 +157,6 @@ const state = {
   },
   analysis: {
     sampleRateInput: 0,
-    sampleRateModel: MODEL_SAMPLE_RATE,
-    hopSizeMs: samplesToMs(MIN_HOP_SAMPLES),
-    hopSizeSamples: MIN_HOP_SAMPLES,
-    inferMsEwma: null,
-    inferenceCount: 0,
-    lastHopControlAt: 0,
-    lastHopChangeAt: 0,
-    lastQueueDropAt: 0,
-    pressureWindows: 0,
-    relaxWindows: 0,
-    pendingQueueSkipSamples: 0,
     confidenceThreshold: 0.5,
   },
   canvas: {
@@ -225,261 +187,6 @@ const state = {
     progress: 0,
   },
 };
-
-class StreamingResampler {
-  constructor(fromRate, toRate) {
-    this.fromRate = fromRate;
-    this.toRate = toRate;
-    this.step = fromRate / toRate;
-    this.tail = null;
-    this.position = 0;
-  }
-
-  process(input) {
-    if (!input || input.length === 0) {
-      return new Float32Array(0);
-    }
-
-    const hasTail = this.tail !== null;
-    const data = new Float32Array(input.length + (hasTail ? 1 : 0));
-    if (hasTail) {
-      data[0] = this.tail;
-      data.set(input, 1);
-    } else {
-      data.set(input);
-    }
-
-    const values = [];
-    let position = this.position;
-    while (position < data.length - 1) {
-      const index = Math.floor(position);
-      const fraction = position - index;
-      values.push(data[index] * (1 - fraction) + data[index + 1] * fraction);
-      position += this.step;
-    }
-
-    this.tail = data[data.length - 1];
-    this.position = position - (data.length - 1);
-    return Float32Array.from(values);
-  }
-}
-
-class CrepePitchEngine {
-  constructor() {
-    this.kind = "CREPE";
-    this.model = null;
-    this.modelType = "layers";
-    this.ready = false;
-  }
-
-  async initialize(onStatus) {
-    onStatus("Loading PitchCREPE model");
-    await loadScript(CREPE_TFJS_URL);
-
-    if (!window.tf) {
-      throw new Error("TensorFlow.js is not available");
-    }
-
-    try {
-      await window.tf.setBackend("webgl");
-    } catch (error) {
-      await window.tf.setBackend("cpu");
-    }
-    await window.tf.ready();
-
-    try {
-      this.model = await window.tf.loadLayersModel(CREPE_MODEL_URL);
-      this.modelType = "layers";
-    } catch (layersError) {
-      this.model = await window.tf.loadGraphModel(CREPE_MODEL_URL);
-      this.modelType = "graph";
-    }
-
-    this.ready = true;
-    this.kind = "CREPE TFJS";
-    onStatus(`PitchCREPE ready (${window.tf.getBackend()})`);
-  }
-
-  async estimate(frame) {
-    if (!this.ready) {
-      return yinEstimate(frame, MODEL_SAMPLE_RATE);
-    }
-
-    const normalized = normalizeAudioFrame(frame);
-    const tf = window.tf;
-    const input = tf.tensor(normalized, [1, FRAME_SIZE]);
-    let output = null;
-    let tensor = null;
-
-    try {
-      output = this.modelType === "graph"
-        ? await this.model.executeAsync(input)
-        : this.model.predict(input);
-      tensor = Array.isArray(output) ? output[0] : output;
-      const activations = await tensor.data();
-      return activationToPitch(activations);
-    } finally {
-      input.dispose();
-      disposeTensorOutput(output);
-    }
-  }
-}
-
-function loadScript(src) {
-  return new Promise((resolve, reject) => {
-    const existing = document.querySelector(`script[src="${src}"]`);
-    if (existing) {
-      if (existing.dataset.loaded === "true") {
-        resolve();
-      } else {
-        existing.addEventListener("load", () => resolve(), { once: true });
-        existing.addEventListener("error", () => reject(new Error(`Failed to load ${src}`)), { once: true });
-      }
-      return;
-    }
-
-    const script = document.createElement("script");
-    script.src = src;
-    script.async = true;
-    script.dataset.loaded = "false";
-    script.onload = () => {
-      script.dataset.loaded = "true";
-      resolve();
-    };
-    script.onerror = () => reject(new Error(`Failed to load ${src}`));
-    document.head.appendChild(script);
-  });
-}
-
-function normalizeAudioFrame(frame) {
-  let sum = 0;
-  for (let i = 0; i < frame.length; i += 1) {
-    sum += frame[i];
-  }
-  const mean = sum / frame.length;
-
-  let variance = 0;
-  for (let i = 0; i < frame.length; i += 1) {
-    const centered = frame[i] - mean;
-    variance += centered * centered;
-  }
-
-  const std = Math.sqrt(variance / frame.length) || 1;
-  const normalized = new Float32Array(frame.length);
-  for (let i = 0; i < frame.length; i += 1) {
-    normalized[i] = (frame[i] - mean) / std;
-  }
-  return normalized;
-}
-
-function disposeTensorOutput(output) {
-  if (!output) {
-    return;
-  }
-  if (Array.isArray(output)) {
-    output.forEach((item) => item && typeof item.dispose === "function" && item.dispose());
-    return;
-  }
-  if (typeof output.dispose === "function") {
-    output.dispose();
-  }
-}
-
-function activationToPitch(activations) {
-  let maxIndex = 0;
-  let confidence = -Infinity;
-  for (let i = 0; i < activations.length; i += 1) {
-    if (activations[i] > confidence) {
-      confidence = activations[i];
-      maxIndex = i;
-    }
-  }
-
-  const start = Math.max(0, maxIndex - 4);
-  const end = Math.min(activations.length - 1, maxIndex + 4);
-  let weight = 0;
-  let weightedCents = 0;
-
-  for (let i = start; i <= end; i += 1) {
-    const value = Math.max(0, activations[i]);
-    const cents = 1997.3794084376191 + 20 * i;
-    weight += value;
-    weightedCents += cents * value;
-  }
-
-  const cents = weight > 0
-    ? weightedCents / weight
-    : 1997.3794084376191 + 20 * maxIndex;
-  return {
-    frequency: 10 * Math.pow(2, cents / 1200),
-    confidence: Math.max(0, Math.min(1, confidence)),
-  };
-}
-
-function yinEstimate(frame, sampleRate) {
-  const minFrequency = 32.7;
-  const maxFrequency = midiToFrequency(HARD_MAX_MIDI);
-  const minTau = Math.max(2, Math.floor(sampleRate / maxFrequency));
-  const maxTau = Math.min(Math.floor(sampleRate / minFrequency), Math.floor(frame.length / 2));
-  const difference = new Float32Array(maxTau + 1);
-
-  for (let tau = 1; tau <= maxTau; tau += 1) {
-    let sum = 0;
-    for (let i = 0; i < frame.length - tau; i += 1) {
-      const delta = frame[i] - frame[i + tau];
-      sum += delta * delta;
-    }
-    difference[tau] = sum;
-  }
-
-  let runningSum = 0;
-  const cmnd = new Float32Array(maxTau + 1);
-  cmnd[0] = 1;
-  let tauEstimate = -1;
-  const threshold = 0.12;
-
-  for (let tau = 1; tau <= maxTau; tau += 1) {
-    runningSum += difference[tau];
-    cmnd[tau] = difference[tau] * tau / (runningSum || 1);
-    if (tau >= minTau && tauEstimate < 0 && cmnd[tau] < threshold) {
-      while (tau + 1 <= maxTau && cmnd[tau + 1] < cmnd[tau]) {
-        tau += 1;
-      }
-      tauEstimate = tau;
-    }
-  }
-
-  if (tauEstimate < 0) {
-    let bestTau = minTau;
-    for (let tau = minTau + 1; tau <= maxTau; tau += 1) {
-      if (cmnd[tau] < cmnd[bestTau]) {
-        bestTau = tau;
-      }
-    }
-    tauEstimate = bestTau;
-  }
-
-  const betterTau = parabolicTau(cmnd, tauEstimate);
-  const confidence = Math.max(0, Math.min(1, 1 - cmnd[tauEstimate]));
-  return {
-    frequency: sampleRate / betterTau,
-    confidence,
-  };
-}
-
-function parabolicTau(values, tau) {
-  if (tau <= 0 || tau >= values.length - 1) {
-    return tau;
-  }
-  const left = values[tau - 1];
-  const center = values[tau];
-  const right = values[tau + 1];
-  const divisor = 2 * (2 * center - right - left);
-  if (!Number.isFinite(divisor) || Math.abs(divisor) < 1e-9) {
-    return tau;
-  }
-  return tau + (right - left) / divisor;
-}
 
 function loadSettings() {
   let stored = {};
@@ -658,7 +365,7 @@ function updateModeControls() {
   }
   const legend = document.getElementById("multiLegend");
   if (legend) legend.hidden = !isMultiMode();
-  setText(els.engineBadge, isMultiMode() ? "EffeTune DSP" : state.engine?.kind || "CREPE");
+  setText(els.engineBadge, isMultiMode() ? "EffeTune DSP · Multi F0" : "EffeTune DSP · Pitch Meter");
   const pitchZoomTitle = tunerMode ? "Pitch zoom disabled in Tuner mode" : "Zoom pitch in";
   const pitchZoomOutTitle = tunerMode ? "Pitch zoom disabled in Tuner mode" : "Zoom pitch out";
 
@@ -1231,9 +938,6 @@ function createAnalysisSnapshot() {
     currentIndex: state.currentSample ? state.pitchSamples.indexOf(state.currentSample) : -1,
     hoverIndex: state.view.hoverSample ? state.pitchSamples.indexOf(state.view.hoverSample) : -1,
     latestTimeSec: state.latestTimeSec,
-    frameStartSample: state.frameStartSample,
-    modelQueue: new Float32Array(state.modelQueue),
-    pendingQueueSkipSamples: state.analysis.pendingQueueSkipSamples,
     tunerAverage: { ...state.tunerAverage },
     sustainedDeviation: { ...state.sustainedDeviation },
     view: {
@@ -1256,9 +960,6 @@ function restoreAnalysisSnapshot(snapshot) {
     ? state.pitchSamples[snapshot.currentIndex]
     : null;
   state.latestTimeSec = snapshot.latestTimeSec;
-  state.frameStartSample = snapshot.frameStartSample;
-  state.modelQueue = new Float32Array(snapshot.modelQueue);
-  state.analysis.pendingQueueSkipSamples = snapshot.pendingQueueSkipSamples;
   Object.assign(state.tunerAverage, snapshot.tunerAverage);
   Object.assign(state.sustainedDeviation, snapshot.sustainedDeviation);
   state.view.followNow = snapshot.view.followNow;
@@ -1288,9 +989,6 @@ function resetPitchHistoryState() {
   state.pitchSamples = [];
   state.currentSample = null;
   state.latestTimeSec = 0;
-  state.frameStartSample = 0;
-  state.modelQueue = new Float32Array(0);
-  state.analysis.pendingQueueSkipSamples = 0;
   resetTunerAverageState();
   resetSustainedDeviationState();
   clearRendererSamples();
@@ -1333,29 +1031,7 @@ function setRunningMessage() {
 }
 
 function runningStatusMessage() {
-  if (isMultiMode()) return "Running · polyphonic";
-  const hopMs = formatAdaptiveHopMs(state.analysis.hopSizeMs);
-  return `Running (${hopMs} ms hop, ${adaptiveHopStatusLabel()})`;
-}
-
-function adaptiveHopStatusLabel() {
-  const now = nowMs();
-  if (now - state.analysis.lastQueueDropAt < RUNNING_STATUS_CATCHUP_MS) {
-    return "catch-up";
-  }
-  if (
-    Number.isFinite(state.analysis.inferMsEwma)
-    && state.analysis.inferMsEwma + FRAME_CENTER_MS > QUEUE_LATENCY_LIMIT_MS
-  ) {
-    return "limited";
-  }
-  if (now - state.analysis.lastHopChangeAt < RUNNING_STATUS_ADAPTING_MS) {
-    return "adapting";
-  }
-  if (state.analysis.hopSizeSamples <= MIN_HOP_SAMPLES) {
-    return "max res";
-  }
-  return "stable";
+  return isMultiMode() ? "Running · polyphonic" : "Running · monophonic";
 }
 
 function isPageHidden() {
@@ -1375,32 +1051,17 @@ function disconnectAudioNode(node) {
 
 function invalidateAnalysisQueue() {
   state.analysisGeneration += 1;
-  state.modelQueue = new Float32Array(0);
-  state.analysis.pendingQueueSkipSamples = 0;
 }
 
 function releaseCaptureResources() {
-  if (state.multiNode) {
-    state.multiNode.close();
-    state.multiNode = null;
+  if (state.dspNode) {
+    state.dspNode.close();
+    state.dspNode = null;
   }
   stopAnimationLoop();
   invalidateAnalysisQueue();
-  state.resampler = null;
-
-  if (state.captureNode) {
-    state.captureNode.port.onmessage = null;
-    if (typeof state.captureNode.port.close === "function") {
-      state.captureNode.port.close();
-    }
-  }
-  if (state.scriptNode) {
-    state.scriptNode.onaudioprocess = null;
-  }
 
   disconnectAudioNode(state.sourceNode);
-  disconnectAudioNode(state.captureNode);
-  disconnectAudioNode(state.scriptNode);
   disconnectAudioNode(state.silentGain);
 
   if (state.stream) {
@@ -1416,9 +1077,7 @@ function releaseCaptureResources() {
   state.audioContext = null;
   state.stream = null;
   state.sourceNode = null;
-  state.captureNode = null;
   state.silentGain = null;
-  state.scriptNode = null;
 }
 
 function pauseForDeactivation() {
@@ -1501,17 +1160,10 @@ async function startMic(options = {}) {
     const AudioContextClass = window.AudioContext || window.webkitAudioContext;
     state.audioContext = new AudioContextClass();
     state.analysis.sampleRateInput = state.audioContext.sampleRate;
-    state.resampler = new StreamingResampler(state.analysis.sampleRateInput, MODEL_SAMPLE_RATE);
     state.sourceNode = state.audioContext.createMediaStreamSource(state.stream);
 
     if (isMultiMode()) await setupMultiCapture();
-    else await setupAudioCapture();
-    if (requestGeneration !== state.analysisGeneration || isPageHidden()) {
-      pauseForDeactivation();
-      return;
-    }
-
-    if (!isMultiMode()) await setupPitchEngine();
+    else await setupPitchCapture();
     if (requestGeneration !== state.analysisGeneration || isPageHidden()) {
       pauseForDeactivation();
       return;
@@ -1526,34 +1178,47 @@ async function startMic(options = {}) {
     setMicState("error");
     const message = error && error.name === "NotAllowedError"
       ? "Microphone permission was denied"
-      : isMultiMode() ? "EffeTune DSP could not start. Please retry in a browser with AudioWorklet support." : "Failed to load the PitchCREPE model";
+      : "EffeTune DSP could not start. Please retry in a browser with AudioWorklet support.";
     setMessage(message, true);
     console.error(error);
   }
 }
 
-async function setupAudioCapture() {
-  if (!state.audioContext || !state.sourceNode) {
-    return;
-  }
+async function setupPitchCapture() {
+  setMessage("Loading EffeTune Pitch Meter");
+  const generation = state.analysisGeneration;
+  const context = state.audioContext;
+  const [{ EffeTuneNode }, api] = await Promise.all([
+    import("./vendor/effetune/dist/worklet.js"), import("./single-f0.js"),
+  ]);
+  if (generation !== state.analysisGeneration) return;
+  const node = await EffeTuneNode.create(context, api.pitchChain, { channels: 1 });
+  if (generation !== state.analysisGeneration) { node.close(); return; }
+  state.dspNode = node;
+  state.pitchTimeOffset = state.latestTimeSec;
+  state.pitchTimeOrigin = null;
+  node.subscribe((frame) => {
+    if (isMultiMode() || state.dspNode !== node || state.micState !== "running"
+      || frame.kind !== "pitch") return;
+    if (state.pitchTimeOrigin === null) state.pitchTimeOrigin = frame.timeSeconds;
+    const sample = api.observation(frame, state.pitchTimeOffset - state.pitchTimeOrigin);
+    if (sample) addPitchSample(sample.timeSec, sample.frequency, sample.confidence,
+      { volumeDb: sample.volumeDb });
+  });
+  connectDspNode(node, context);
+}
 
-  try {
-    await state.audioContext.audioWorklet.addModule("audio-worklet.js");
-    state.captureNode = new AudioWorkletNode(state.audioContext, "f0-input-processor");
-    state.captureNode.port.onmessage = (event) => {
-      if (event.data && event.data.type === "audio") {
-        handleAudioChunk(event.data.buffer);
-      }
-    };
-    state.silentGain = state.audioContext.createGain();
-    state.silentGain.gain.value = 0;
-    state.sourceNode.connect(state.captureNode);
-    state.captureNode.connect(state.silentGain);
-    state.silentGain.connect(state.audioContext.destination);
-  } catch (error) {
-    setupScriptProcessorFallback();
-    setMessage("Compatibility mode active");
-  }
+function connectDspNode(node, context) {
+  node.onprocessorerror = () => {
+    releaseCaptureResources();
+    setMicState("error");
+    setMessage("EffeTune DSP stopped. Start the microphone to retry.", true);
+  };
+  state.silentGain = context.createGain();
+  state.silentGain.gain.value = 0;
+  state.sourceNode.connect(node);
+  node.connect(state.silentGain);
+  state.silentGain.connect(context.destination);
 }
 
 async function setupMultiCapture() {
@@ -1566,11 +1231,11 @@ async function setupMultiCapture() {
   if (generation !== state.analysisGeneration) return;
   const node = await EffeTuneNode.create(context, api.noteChain, { channels: 1 });
   if (generation !== state.analysisGeneration) { node.close(); return; }
-  state.multiNode = node;
+  state.dspNode = node;
   state.multiTimeOffset = state.latestTimeSec;
   state.multiTimeOrigin = null;
   node.subscribe((frame) => {
-    if (!isMultiMode() || state.multiNode !== node || state.micState !== "running"
+    if (!isMultiMode() || state.dspNode !== node || state.micState !== "running"
       || frame.kind !== "noteSpectrogram") return;
     if (state.multiTimeOrigin === null) state.multiTimeOrigin = frame.timeSeconds;
     const offset = state.multiTimeOffset - state.multiTimeOrigin;
@@ -1589,16 +1254,7 @@ async function setupMultiCapture() {
     markBackgroundDirty();
     requestStatusUpdate();
   });
-  node.onprocessorerror = () => {
-    releaseCaptureResources();
-    setMicState("error");
-    setMessage("EffeTune DSP stopped. Start the microphone to retry.", true);
-  };
-  state.silentGain = context.createGain();
-  state.silentGain.gain.value = 0;
-  state.sourceNode.connect(node);
-  node.connect(state.silentGain);
-  state.silentGain.connect(context.destination);
+  connectDspNode(node, context);
 }
 
 function analyzeUploadedMultiAudio(audio, sampleRate, token) {
@@ -1635,258 +1291,33 @@ function currentMultiNotes() {
   return [...notes.values()].sort((a, b) => a.midiFloat - b.midiFloat);
 }
 
-function setupScriptProcessorFallback() {
-  const bufferSize = 1024;
-  state.scriptNode = state.audioContext.createScriptProcessor(bufferSize, 1, 1);
-  state.scriptNode.onaudioprocess = (event) => {
-    const input = event.inputBuffer.getChannelData(0);
-    handleAudioChunk(new Float32Array(input));
-  };
-  state.silentGain = state.audioContext.createGain();
-  state.silentGain.gain.value = 0;
-  state.sourceNode.connect(state.scriptNode);
-  state.scriptNode.connect(state.silentGain);
-  state.silentGain.connect(state.audioContext.destination);
-}
-
-async function setupPitchEngine() {
-  if (isMultiMode()) return;
-  if (state.engine) {
-    return;
-  }
-
-  const engine = new CrepePitchEngine();
-  try {
-    await engine.initialize((message) => setMessage(message));
-    state.engine = engine;
-    els.engineBadge.textContent = engine.kind;
-  } catch (error) {
-    state.engine = {
-      kind: "YIN fallback",
-      estimate: async (frame) => yinEstimate(frame, MODEL_SAMPLE_RATE),
-    };
-    els.engineBadge.textContent = "YIN";
-    setMessage("Compatibility mode: PitchCREPE model unavailable", true);
-    console.error(error);
-  }
-}
-
 function resetSessionClock() {
-  state.modelQueue = new Float32Array(0);
-  state.processingQueue = false;
-  resetAdaptiveHopState();
   if (state.pitchSamples.length === 0) {
-    state.frameStartSample = 0;
     state.latestTimeSec = 0;
     state.currentSample = null;
-  } else {
-    state.frameStartSample = Math.round(state.latestTimeSec * MODEL_SAMPLE_RATE);
   }
 }
 
-function handleAudioChunk(inputChunk) {
-  if (isMultiMode()) return;
-  if (state.micState !== "running" || !state.resampler) {
-    return;
-  }
-
-  const resampled = state.resampler.process(inputChunk);
-  if (resampled.length === 0) {
-    return;
-  }
-
-  enqueueModelAudio(resampled);
-}
-
-function resetAdaptiveHopState() {
-  const now = nowMs();
-  state.analysis.hopSizeSamples = MIN_HOP_SAMPLES;
-  state.analysis.hopSizeMs = samplesToMs(MIN_HOP_SAMPLES);
-  state.analysis.inferMsEwma = null;
-  state.analysis.inferenceCount = 0;
-  state.analysis.lastHopControlAt = now;
-  state.analysis.lastHopChangeAt = 0;
-  state.analysis.lastQueueDropAt = 0;
-  state.analysis.pressureWindows = 0;
-  state.analysis.relaxWindows = 0;
-  state.analysis.pendingQueueSkipSamples = 0;
-}
-
-function consumePendingQueueSkip(chunk) {
-  if (state.analysis.pendingQueueSkipSamples <= 0) {
-    return chunk;
-  }
-
-  const skipSamples = Math.min(state.analysis.pendingQueueSkipSamples, chunk.length);
-  state.analysis.pendingQueueSkipSamples -= skipSamples;
-  if (skipSamples >= chunk.length) {
-    return new Float32Array(0);
-  }
-  return chunk.subarray(skipSamples);
-}
-
-function enqueueModelAudio(chunk) {
-  const alignedChunk = consumePendingQueueSkip(chunk);
-  if (alignedChunk.length === 0) {
-    requestStatusUpdate();
-    return;
-  }
-
-  const merged = new Float32Array(state.modelQueue.length + alignedChunk.length);
-  merged.set(state.modelQueue, 0);
-  merged.set(alignedChunk, state.modelQueue.length);
-  state.modelQueue = merged;
-
-  enforceQueueLatencyLimit();
-  drainAnalysisQueue();
-}
-
-function enforceQueueLatencyLimit() {
-  const queueMs = samplesToMs(state.modelQueue.length);
-  const inferMs = Number.isFinite(state.analysis.inferMsEwma) ? state.analysis.inferMsEwma : 0;
-  const predictedLatencyMs = Math.max(0, queueMs - FRAME_CENTER_MS) + inferMs;
-  if (queueMs <= QUEUE_LATENCY_LIMIT_MS && predictedLatencyMs <= QUEUE_LATENCY_LIMIT_MS) {
-    return 0;
-  }
-
-  const minimumQueueMs = samplesToMs(FRAME_SIZE);
-  const targetQueueMs = clamp(
-    QUEUE_TARGET_LATENCY_MS - inferMs + FRAME_CENTER_MS,
-    minimumQueueMs,
-    QUEUE_RECOVERY_MS,
-  );
-  const targetSamples = msToSamples(targetQueueMs);
-  const dropSamples = Math.max(0, state.modelQueue.length - targetSamples);
-  if (dropSamples <= 0) {
-    return 0;
-  }
-
-  state.modelQueue = state.modelQueue.slice(dropSamples);
-  state.frameStartSample += dropSamples;
-  state.analysis.lastQueueDropAt = nowMs();
-  state.analysis.pressureWindows = Math.max(state.analysis.pressureWindows, 1);
-  return dropSamples;
-}
-
-async function drainAnalysisQueue() {
-  if (state.processingQueue || !state.engine) {
-    return;
-  }
-
-  const generation = state.analysisGeneration;
-  state.processingQueue = true;
-  try {
-    while (state.micState === "running" && state.modelQueue.length >= FRAME_SIZE && generation === state.analysisGeneration) {
-      const frame = new Float32Array(state.modelQueue.subarray(0, FRAME_SIZE));
-      const hopSamples = state.analysis.hopSizeSamples;
-      const queuedBeforeStep = state.modelQueue.length;
-      const queuedStep = Math.min(hopSamples, queuedBeforeStep);
-      state.modelQueue = state.modelQueue.slice(queuedStep);
-      state.analysis.pendingQueueSkipSamples += hopSamples - queuedStep;
-
-      const frameCenterSample = state.frameStartSample + FRAME_SIZE / 2;
-      const timeSec = frameCenterSample / MODEL_SAMPLE_RATE;
-      state.frameStartSample += hopSamples;
-
-      const inferenceStartedAt = nowMs();
-      const result = await state.engine.estimate(frame);
-      recordInferenceDuration(nowMs() - inferenceStartedAt);
-      if (state.micState !== "running" || generation !== state.analysisGeneration) {
-        break;
-      }
-      enforceQueueLatencyLimit();
-      maybeAdjustAdaptiveHop();
-      addPitchSample(timeSec, result.frequency, result.confidence);
-    }
-  } finally {
-    state.processingQueue = false;
-    if (state.micState === "running" && state.modelQueue.length >= FRAME_SIZE) {
-      drainAnalysisQueue();
-    }
-  }
-}
-
-function recordInferenceDuration(durationMs) {
-  if (!Number.isFinite(durationMs) || durationMs < 0) {
-    return;
-  }
-
-  const boundedDurationMs = clamp(durationMs, 0, MAX_TRACKED_INFERENCE_MS);
-  const previous = state.analysis.inferMsEwma;
-  state.analysis.inferMsEwma = Number.isFinite(previous)
-    ? previous + INFERENCE_EWMA_ALPHA * (boundedDurationMs - previous)
-    : boundedDurationMs;
-  state.analysis.inferenceCount += 1;
-}
-
-function maybeAdjustAdaptiveHop() {
-  if (state.analysis.inferenceCount < 4 || !Number.isFinite(state.analysis.inferMsEwma)) {
-    return;
-  }
-
-  const now = nowMs();
-  if (now - state.analysis.lastHopControlAt < HOP_CONTROL_INTERVAL_MS) {
-    return;
-  }
-  state.analysis.lastHopControlAt = now;
-
-  const currentSamples = state.analysis.hopSizeSamples;
-  const currentHopMs = samplesToMs(currentSamples);
-  const inferMs = state.analysis.inferMsEwma;
-  const load = inferMs / Math.max(1, currentHopMs);
-  const queueMs = samplesToMs(state.modelQueue.length);
-  const desiredSamples = desiredHopSamplesForInference(inferMs);
-
-  if (queueMs > QUEUE_PRESSURE_MS || load > 0.9 || desiredSamples > currentSamples * HOP_INCREASE_RATIO) {
-    state.analysis.pressureWindows += 1;
-    state.analysis.relaxWindows = 0;
-  } else if (
-    queueMs < QUEUE_RELAXED_MS
-    && load < 0.55
-    && desiredSamples < currentSamples * HOP_DECREASE_RATIO
-  ) {
-    state.analysis.relaxWindows += 1;
-    state.analysis.pressureWindows = 0;
-  } else {
-    state.analysis.pressureWindows = 0;
-    state.analysis.relaxWindows = 0;
-  }
-
-  const needsImmediateIncrease = desiredSamples > currentSamples * 1.35 || queueMs > QUEUE_PRESSURE_MS;
-  if (desiredSamples > currentSamples && (needsImmediateIncrease || state.analysis.pressureWindows >= 2)) {
-    setAdaptiveHopSamples(desiredSamples);
-    state.analysis.pressureWindows = 0;
-    state.analysis.relaxWindows = 0;
-    return;
-  }
-
-  if (desiredSamples < currentSamples && state.analysis.relaxWindows >= 2) {
-    const halfwayToDesired = Math.floor(currentSamples - (currentSamples - desiredSamples) * 0.5);
-    setAdaptiveHopSamples(Math.max(desiredSamples, halfwayToDesired));
-    state.analysis.pressureWindows = 0;
-    state.analysis.relaxWindows = 0;
-  }
-}
-
-function desiredHopSamplesForInference(inferMs) {
-  const requiredMs = inferMs / TARGET_INFERENCE_LOAD;
-  return clampHopSamples(Math.ceil((requiredMs * MODEL_SAMPLE_RATE) / 1000));
-}
-
-function setAdaptiveHopSamples(samples) {
-  const nextSamples = clampHopSamples(samples);
-  if (nextSamples === state.analysis.hopSizeSamples) {
-    return;
-  }
-
-  state.analysis.hopSizeSamples = nextSamples;
-  state.analysis.hopSizeMs = samplesToMs(nextSamples);
-  state.analysis.lastHopChangeAt = nowMs();
-  requestStatusUpdate();
-}
-
-function clampHopSamples(samples) {
-  return clamp(Math.round(samples), MIN_HOP_SAMPLES, MAX_HOP_SAMPLES);
+function analyzeUploadedPitchAudio(audio, sampleRate, token) {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker("single-f0-worker.js", { type: "module" });
+    const finish = (error, results) => {
+      worker.terminate();
+      token.abort = null;
+      if (error) reject(error); else resolve(results);
+    };
+    token.abort = () => finish(createUploadAbortError());
+    worker.onerror = (event) => finish(new Error(event.message));
+    worker.onmessage = ({ data }) => {
+      if (data.error) finish(new Error(data.error));
+      else if (data.results) {
+        data.results.duration = data.duration;
+        finish(null, data.results);
+      } else setUploadProgress("Analyzing monophonic audio", UPLOAD_PROGRESS_ENGINE_END
+        + data.progress * (UPLOAD_PROGRESS_ANALYSIS_END - UPLOAD_PROGRESS_ENGINE_END));
+    };
+    worker.postMessage({ audio, sampleRate }, [audio.buffer]);
+  });
 }
 
 function addPitchSample(timeSec, frequency, confidence, options = {}) {
@@ -1999,9 +1430,12 @@ function clearHistory() {
   }
 
   resetPitchHistoryState();
-  if (state.multiNode) {
+  if (isMultiMode() && state.dspNode) {
     state.multiTimeOrigin = null;
     state.multiTimeOffset = 0;
+  } else if (state.dspNode) {
+    state.pitchTimeOrigin = null;
+    state.pitchTimeOffset = 0;
   }
   updateStatus();
   draw();
@@ -2119,17 +1553,11 @@ async function processUploadedAudio(file) {
     const monoAudio = await mixAudioBufferToMono(audioBuffer, token);
     checkUploadCancelled(token);
 
-    const modelAudio = isMultiMode() ? monoAudio : await resampleAudioToModelRate(monoAudio, audioBuffer.sampleRate, token);
-    checkUploadCancelled(token);
-
     setUploadProgress("Preparing estimator", UPLOAD_PROGRESS_PREPARE_END);
-    await setupPitchEngine();
-    checkUploadCancelled(token);
-
     setUploadProgress("Analyzing audio", UPLOAD_PROGRESS_ENGINE_END);
     const results = isMultiMode()
-      ? await analyzeUploadedMultiAudio(modelAudio, audioBuffer.sampleRate, token)
-      : await analyzeUploadedModelAudio(modelAudio, token);
+      ? await analyzeUploadedMultiAudio(monoAudio, audioBuffer.sampleRate, token)
+      : await analyzeUploadedPitchAudio(monoAudio, audioBuffer.sampleRate, token);
     checkUploadCancelled(token);
 
     setUploadProgress("Updating graph", UPLOAD_PROGRESS_ANALYSIS_END);
@@ -2199,7 +1627,7 @@ async function decodeUploadedAudio(file, token) {
 }
 
 async function mixAudioBufferToMono(audioBuffer, token) {
-  const sampleRate = Math.max(1, audioBuffer.sampleRate || MODEL_SAMPLE_RATE);
+  const sampleRate = Math.max(1, audioBuffer.sampleRate || 48000);
   const maxSamples = Math.min(audioBuffer.length, Math.floor(sampleRate * MAX_HISTORY_SECONDS));
   const channelCount = Math.max(1, audioBuffer.numberOfChannels || 1);
   const channels = [];
@@ -2229,78 +1657,6 @@ async function mixAudioBufferToMono(audioBuffer, token) {
   return output;
 }
 
-async function resampleAudioToModelRate(input, fromRate, token) {
-  if (input.length === 0) {
-    return input;
-  }
-  if (Math.abs(fromRate - MODEL_SAMPLE_RATE) < 1) {
-    setUploadProgress("Preparing audio", UPLOAD_PROGRESS_PREPARE_END);
-    return input;
-  }
-
-  const outputLength = Math.max(1, Math.floor(((input.length - 1) * MODEL_SAMPLE_RATE) / fromRate) + 1);
-  const output = new Float32Array(outputLength);
-  const step = fromRate / MODEL_SAMPLE_RATE;
-  const progressStart = UPLOAD_PROGRESS_DECODE_END
-    + (UPLOAD_PROGRESS_PREPARE_END - UPLOAD_PROGRESS_DECODE_END) * 0.45;
-
-  for (let start = 0; start < outputLength; start += UPLOAD_AUDIO_CHUNK_SAMPLES) {
-    checkUploadCancelled(token);
-    const end = Math.min(outputLength, start + UPLOAD_AUDIO_CHUNK_SAMPLES);
-    for (let i = start; i < end; i += 1) {
-      const position = i * step;
-      const index = Math.floor(position);
-      const nextIndex = Math.min(input.length - 1, index + 1);
-      const fraction = position - index;
-      output[i] = input[index] * (1 - fraction) + input[nextIndex] * fraction;
-    }
-
-    const ratio = end / outputLength;
-    const progress = progressStart + (UPLOAD_PROGRESS_PREPARE_END - progressStart) * ratio;
-    setUploadProgress("Preparing audio", progress);
-    await yieldToMainThread();
-  }
-
-  return output;
-}
-
-async function analyzeUploadedModelAudio(modelAudio, token) {
-  const hopSamples = MIN_HOP_SAMPLES;
-  const totalFrames = modelAudio.length >= FRAME_SIZE
-    ? Math.floor((modelAudio.length - FRAME_SIZE) / hopSamples) + 1
-    : 0;
-  const results = [];
-
-  if (totalFrames === 0) {
-    setUploadProgress("Analyzing audio", UPLOAD_PROGRESS_ANALYSIS_END);
-    return results;
-  }
-
-  for (let frameIndex = 0; frameIndex < totalFrames; frameIndex += 1) {
-    checkUploadCancelled(token);
-    const start = frameIndex * hopSamples;
-    const frame = new Float32Array(modelAudio.subarray(start, start + FRAME_SIZE));
-    const result = await state.engine.estimate(frame);
-    checkUploadCancelled(token);
-
-    results.push({
-      timeSec: (start + FRAME_SIZE / 2) / MODEL_SAMPLE_RATE,
-      frequency: result.frequency,
-      confidence: result.confidence,
-    });
-
-    if (frameIndex % UPLOAD_ANALYSIS_YIELD_FRAMES === 0 || frameIndex === totalFrames - 1) {
-      const ratio = (frameIndex + 1) / totalFrames;
-      const progress = UPLOAD_PROGRESS_ENGINE_END
-        + (UPLOAD_PROGRESS_ANALYSIS_END - UPLOAD_PROGRESS_ENGINE_END) * ratio;
-      setUploadProgress("Analyzing audio", progress);
-      await yieldToMainThread();
-    }
-  }
-
-  return results;
-}
-
 function replacePitchHistoryWithUploadResults(results) {
   resetPitchHistoryState();
 
@@ -2314,7 +1670,7 @@ function replacePitchHistoryWithUploadResults(results) {
     });
   }
 
-  if (isMultiMode() && Number.isFinite(results.duration)) state.latestTimeSec = results.duration;
+  if (Number.isFinite(results.duration)) state.latestTimeSec = results.duration;
   state.view.followNow = false;
   state.view.manualRightTime = isMultiMode()
     ? Math.max(state.view.visibleSeconds, state.latestTimeSec - MAX_HISTORY_SECONDS + state.view.visibleSeconds)
@@ -2424,21 +1780,6 @@ function nowMs() {
     return performance.now();
   }
   return Date.now();
-}
-
-function samplesToMs(samples) {
-  return (samples / MODEL_SAMPLE_RATE) * 1000;
-}
-
-function msToSamples(ms) {
-  return Math.round((MODEL_SAMPLE_RATE * ms) / 1000);
-}
-
-function formatAdaptiveHopMs(ms) {
-  if (ms >= 100) {
-    return ms.toFixed(0);
-  }
-  return ms.toFixed(1);
 }
 
 function requestStatusUpdate() {

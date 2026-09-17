@@ -3,8 +3,8 @@
 <!-- BEGIN DSP-LIBRARY-JAVASCRIPT-SUMMARY -->
 EffeTune DSP provides the same MIT-licensed C++ audio kernels used by EffeTune
 as a self-contained WebAssembly package for Node.js and evergreen browsers.
-Version 0.9.0 exposes all 100 catalog types through the generic Chain and
-`createEffect` APIs and 100 generated named convenience classes,
+Version 0.10.0 exposes all 103 catalog types through the generic Chain and
+`createEffect` APIs and 103 generated named convenience classes,
 decoded analyzer telemetry, versioned semantic presets, deterministic seeds, and an AudioWorklet wrapper.
 <!-- END DSP-LIBRARY-JAVASCRIPT-SUMMARY -->
 
@@ -178,7 +178,7 @@ verify exact byte length and SHA-256 before accepting an ETA1 payload. The
 complete payload and convolution footprint must fit the 32 MiB kernel cap.
 
 `EFFECT_CATALOG` and `getEffectCatalog()` expose the machine-readable semantic
-catalog for all 100 root classes and their `create<Type>()` factories. The
+catalog for all 101 root classes and their `create<Type>()` factories. The
 catalog contains channel choices, parameters, required assets, telemetry, and
 latency declarations, but no private implementation mapping.
 

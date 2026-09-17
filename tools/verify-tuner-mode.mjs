@@ -1,5 +1,29 @@
 import { readFile } from "node:fs/promises";
 import vm from "node:vm";
+import { createChain } from "../vendor/effetune/dist/index.js";
+
+const singleF0Source = await readFile(new URL("../single-f0.js", import.meta.url), "utf8");
+const { observation, pitchChain } = await import(
+  `data:text/javascript;base64,${Buffer.from(singleF0Source).toString("base64")}`,
+);
+const testSampleRate = 48000;
+const testTone = Float32Array.from({ length: testSampleRate }, (_, index) =>
+  0.3 * Math.sin(2 * Math.PI * 440 * index / testSampleRate));
+const pitchChainInstance = await createChain(pitchChain);
+const pitchObservations = [];
+await pitchChainInstance.process([testTone], {
+  sampleRate: testSampleRate,
+  blockSize: 128,
+  onTelemetry(frame) {
+    const result = observation(frame);
+    if (result) pitchObservations.push(result);
+  },
+});
+pitchChainInstance.close();
+const voicedPitch = pitchObservations.filter((item) => item.frequency > 0);
+if (!voicedPitch.some((item) => Math.abs(item.frequency - 440) < 2 && item.confidence > 0.5)) {
+  throw new Error("EffeTune Pitch Meter should detect the 440 Hz verification tone");
+}
 
 const eventHandlers = new Map();
 
@@ -263,14 +287,8 @@ function canvasPointer(type, overrides = {}) {
 
 context.setMicState("running");
 assert(
-  elements.get("messageStatus").textContent === "Running (10.0 ms hop, max res)",
-  "running status should show the current adaptive hop at min resolution",
-);
-context.setAdaptiveHopSamples(320);
-context.updateStatus();
-assert(
-  elements.get("messageStatus").textContent === "Running (20.0 ms hop, adapting)",
-  "running status should show adaptive hop changes",
+  elements.get("messageStatus").textContent === "Running · monophonic",
+  "running status should identify monophonic analysis",
 );
 context.setMicState("idle");
 context.setMessage("Idle");
@@ -308,9 +326,14 @@ context.window.AudioContext = class {
 };
 
 await vm.runInContext(`(async () => {
-  state.engine = {
-    kind: "mock",
-    estimate: async () => ({ frequency: 440, confidence: 0.95 }),
+  analyzeUploadedPitchAudio = async (audio, sampleRate) => {
+    const results = Array.from({ length: 7 }, (_, index) => ({
+      timeSec: index * 0.01,
+      frequency: 440,
+      confidence: 0.95,
+    }));
+    results.duration = audio.length / sampleRate;
+    return results;
   };
   clearHistory();
   addPitchSample(0, 261.6255653005986, 0.9);
@@ -367,6 +390,16 @@ await vm.runInContext(`(async () => {
 context.clearHistory();
 context.setMicState("idle");
 context.setMessage("Idle");
+vm.runInContext(`
+  state.dspNode = {};
+  state.pitchTimeOrigin = 12;
+  state.pitchTimeOffset = 8;
+  clearHistory();
+  if (state.pitchTimeOrigin !== null || state.pitchTimeOffset !== 0) {
+    throw new Error("clear should reset the live monophonic clock to zero");
+  }
+  state.dspNode = null;
+`, context);
 vm.runInContext(`
   state.audioContext = null;
   state.view.mode = VIEW_MODE_GRAPH;
